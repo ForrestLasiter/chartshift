@@ -5,3 +5,4 @@ public/pdfjs/
 public/tesseract/
 *.log
 smoke.png
+screenshots/

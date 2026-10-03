@@ -64,18 +64,31 @@ export function setTitle(title) {
 
 // --- browser stand-ins ------------------------------------------------------
 
+// Mirrors the desktop library's conflict rules (see electron/library.cjs).
 function memoryLibrary() {
   const songs = new Map();
   const setlists = new Map();
+  let counter = 0;
+  const put = (name, data) => { const version = `v${++counter}`; songs.set(name, { data, modified: Date.now(), version }); return version; };
   return {
     info: async () => ({ dir: '(browser preview: songs are kept in memory only)', clouds: [] }),
     list: async () => ({
       songs: [...songs].map(([name, s]) => ({ name, modified: s.modified, size: s.data.length })).sort((a, b) => a.name.localeCompare(b.name)),
       setlists: [...setlists].map(([name, list]) => ({ name, songs: list })).sort((a, b) => a.name.localeCompare(b.name)),
     }),
-    read: async (name) => songs.get(name).data,
+    read: async (name) => ({ data: songs.get(name).data, version: songs.get(name).version }),
     exists: async (name) => songs.has(name),
-    write: async (name, data) => { songs.set(name, { data, modified: Date.now() }); return name; },
+    write: async (name, data, { expect = null, onConflict = 'ask' } = {}) => {
+      const current = songs.get(name);
+      const verdict = !current ? 'write' : expect != null ? (current.version === expect ? 'write' : 'changed') : 'exists';
+      const kept = [];
+      if (verdict !== 'write') {
+        if (onConflict === 'copy') { const copy = `${name} (my copy ${counter + 1})`; return { name: copy, version: put(copy, data), savedAsCopy: true, kept: null }; }
+        if (onConflict !== 'replace') return { conflict: { reason: verdict, name, modified: current.modified } };
+        if (verdict === 'changed') { kept.push(`${name} (conflict copy ${counter + 1})`); songs.set(kept[0], current); }
+      }
+      return { name, version: put(name, data), kept: kept.length ? kept : null };
+    },
     remove: async (name) => { songs.delete(name); },
     rename: async (from, to) => {
       if (songs.has(to)) throw new Error(`A song called “${to}” already exists.`);

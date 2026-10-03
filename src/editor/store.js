@@ -27,6 +27,7 @@ export function createEditor() {
     textStyle: { ...DEFAULT_TEXT_STYLE },
     name: '',
     savedAs: null, // name in the library, once saved there
+    baseVersion: null, // version of the library copy this song was last read from or saved as
     showChords: true,
     dirty: false,
     busy: '',
@@ -69,13 +70,13 @@ export function createEditor() {
   };
   ed.set = set;
 
-  ed.setDoc = ({ pages, atlases, ids, name, savedAs = null, status }) => {
+  ed.setDoc = ({ pages, atlases, ids, name, savedAs = null, baseVersion = null, status }) => {
     ed.atlases = atlases;
     ed.ids = ids;
     ed.transient = {};
     undoStack.length = 0;
     redoStack.length = 0;
-    set({ pages, selection: new Set(), activePage: 0, editing: null, name, savedAs, dirty: false, status });
+    set({ pages, selection: new Set(), activePage: 0, editing: null, name, savedAs, baseVersion, dirty: false, status });
   };
 
   const selectedOn = (page) => page.pieces.filter((p) => state.selection.has(p.id));

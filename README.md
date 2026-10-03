@@ -13,7 +13,7 @@ npm start          # production build in Electron
 npm run dist:win   # installer -> release/ChartShift Setup <version>.exe
 ```
 
-Other scripts: `npm test` (piece-detection unit tests), `npm run smoke` (opens the sample chart in Electron and writes `smoke.png`), `npm run sample` (regenerates `public/sample.pdf`), `npm run web` (editor in a browser, for development).
+Other scripts: `npm test` (unit tests), `npm run shots` (captures screenshots of the main screens at several window sizes and scaling levels into `screenshots/`), `npm run smoke` (drives the real app in Electron against throwaway folders and checks library conflicts, recovery, the content security policy, navigation/IPC lock-down, keyboard and focus behaviour, mixed-size printing and OCR; `node scripts/check-smoke.mjs release/win-unpacked/ChartShift.exe` runs the same checks on a packaged build), `npm run sample` (regenerates `public/sample.pdf`), `npm run web` (editor in a browser, for development).
 
 ## What it does
 
@@ -24,7 +24,51 @@ Other scripts: `npm test` (piece-detection unit tests), `npm run smoke` (opens t
 - **Layout**: fit a song on one page, or large print.
 - **ChordPro**: open `.cho`/`.chopro` files and export to `.cho`.
 - **Library**: every song and setlist lives in one folder (`Documents\ChartShift Library` by default). Export/import the whole library as a zip, or keep the folder inside OneDrive/Google Drive/Dropbox to sync. Setlists save or print as one PDF.
-- **Autosave**: unsaved work is parked every 15 seconds and offered back after a crash.
+- **Autosave**: unsaved work is parked 15 seconds after a change and offered back after a crash. Saving the song, opening another, or choosing to close without saving discards the parked copy.
+
+## When two PCs change a song
+
+If the library folder is shared through OneDrive, Google Drive, Dropbox or similar, two people can edit the same song.
+
+**What ChartShift guarantees, on each PC:** a save never removes a file's contents unless they are exactly the version that editor last opened or saved. Anything else found under the song's name is kept.
+
+- Every time a song is opened or saved, ChartShift remembers that version (a fingerprint of the file's contents).
+- On save, if the copy in the library is no longer that version, nothing is written. You are told the song was changed somewhere else and asked to choose:
+  - **Save mine as a separate copy** - yours is saved as `Song (my copy <date time>)`; the other version is untouched. Both stay in the library.
+  - **Save mine under this name** - the other version is first kept as `Song (conflict copy <date time>)`, then yours takes the song's name. Both stay in the library.
+  - **Cancel** - nothing is saved yet.
+- Saving a new song under a name that is already taken asks the same way. Here, choosing to replace moves the old song out of the library to the Recycle Bin; it can be restored from there until the bin is emptied.
+- The check is repeated at the moment of writing. The file in the way is moved aside rather than overwritten, so a version that turns up *while* the save is in progress is also kept as a conflict copy.
+- Copy names are always unique. If two copies are made in the same second the later one gets `#2`, `#3`…; an existing file is never overwritten.
+- If ChartShift is interrupted mid-save (crash, power cut), a version that had been set aside reappears in the library as `Song (recovered copy …)`.
+
+**What it cannot guarantee:** sync services copy files between PCs some time later and offer no shared lock. If two PCs both save the same song before they have synced, each save is correct on its own PC and the sync service then decides which copy keeps the name. Services normally keep the other one under their own name (for example `Song-PCNAME` or `Song (conflicted copy)`), which shows up in the library as a separate song - but that behaviour belongs to the service, not to ChartShift. Setlists are small files where the last save wins.
+
+### Changing the library folder, and importing
+
+Choosing a different library folder (or a cloud folder) copies your songs and setlists into it, and importing a library zip adds its songs. Both follow the same rule and report the counts afterwards:
+
+- not in the destination: **copied**;
+- already there with the same contents: counted as **already there and identical**;
+- already there with different contents: **both are kept** - the incoming one is added as `Song (copy from previous folder <date time>)` or `Song (imported copy <date time>)`, and the names are listed.
+
+Nothing in the destination is overwritten or skipped silently, and the previous folder is left as it was.
+
+## Printing pages of different sizes
+
+When a song or setlist mixes page sizes or orientations, Print asks first:
+
+- **Fit every page onto one paper size** (default) - each page is scaled to fit and centred on Letter, A4 or Legal; landscape pages are turned sideways on the sheet. Works with any printer.
+- **Print each page at its own size** - each sheet keeps its page's size. This needs a printer (or a PDF printer) that can switch paper size within one job.
+
+Saving as PDF always keeps each page's own size.
+
+## Safety
+
+- The window can only show the app's own pages (`app://chartshift`): navigation elsewhere, pop-ups and embedded web views are refused, and the pages are served with a strict Content Security Policy (no remote or inline script, no `eval`).
+- Requests from the page to the main process (files, library, recovery, printing) are only honoured from the main window's own top-level page.
+- Song files, imported libraries, PDFs and images are treated as untrusted: sizes and counts are limited, song contents are validated field by field, picture dimensions are checked before decoding, and names from zip files can never write outside the library folder. A file that fails a check is refused with a message; the song you have open is left alone.
+- Limits (see `src/lib/songSchema.js`, `electron/safety.cjs`): files up to 300 MB, PDFs up to 100 pages and 50 inches per side, songs up to 200 pages, library zips up to 1 GB / 2000 items.
 
 ## How it works
 
@@ -34,20 +78,22 @@ Other scripts: `npm test` (piece-detection unit tests), `npm run smoke` (opens t
 - `src/lib/textlayer.js`, `src/lib/ocr.js` – match recognised words (PDF text or Tesseract OCR) to pieces and mark chords.
 - `src/lib/chords.js`, `src/lib/chordpro.js`, `src/lib/layout.js` – chord maths, ChordPro, fit/enlarge.
 - `src/editor/` – `store.js` (pages, selection, tools, undo), `sections.js`, `music.js`.
-- `src/PageView.jsx`, `src/Sidebar.jsx`, `src/dialogs.jsx`, `src/App.jsx` – the UI.
+- `src/App.jsx` (shell: title bar, editing toolbar, welcome screen), `src/PageView.jsx` (one page), `src/Inspector.jsx` (Sections / Chords / Page tabs), `src/dialogs.jsx`, `src/ui.jsx` (shared controls), `src/icons.jsx`, `src/styles.css` (design tokens) – the UI.
 - `src/lib/exporter.js` – flattens pages at 300 dpi into a PDF (pdf-lib) or into images for printing.
 - `src/lib/project.js` – `.chartshift` song files (a zip of `song.json` + sprite sheets), so songs stay editable.
 - `electron/main.cjs`, `electron/library.cjs` – window, dialogs, printing, the library folder, crash recovery.
+- `electron/songStore.cjs` – the file operations behind saving, conflict copies, folder moves and imports. `electron/harness.cjs` – the smoke and screenshot runs.
+- `electron/safety.cjs`, `src/lib/songSchema.js`, `src/lib/recoveryQueue.js`, `src/lib/printPlan.js` – the safety rules: trusted origins, path containment, file limits and validation, save-conflict decisions, autosave ordering, print sheet planning. All pure and unit-tested.
 
 ## Shortcuts
 
 | Keys | Action |
 |---|---|
 | V / T / E | Move, Text box, Eraser tool |
-| 1 – 5 | Grab by section, block, line, word, letter |
+| 1 – 5 | Select by section, block, line, word, letter |
 | . / , | Select the next / previous piece (keyboard-only editing) |
 | Arrow keys (Shift = 10x) | Nudge selection |
 | Shift-drag / Alt-drag | Move in a straight line / move without snapping |
 | Ctrl+C / X / V / D | Copy, cut, paste, duplicate |
 | Ctrl+Z / Ctrl+Y | Undo, redo |
-| Ctrl+O / L / S / E / P | Open file, library, save song, save as PDF, print |
+| Ctrl+O / L / S / E / P | Open, library, save (Ctrl+Shift+S: save under a new name), save as PDF, print |

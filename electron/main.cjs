@@ -1,13 +1,16 @@
-const { app, BrowserWindow, dialog, ipcMain, protocol, net, Menu } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, protocol, net, Menu, session } = require('electron');
 const path = require('path');
 const os = require('os');
 const fs = require('fs/promises');
 const { pathToFileURL } = require('url');
 const library = require('./library.cjs');
+const safety = require('./safety.cjs');
 
 const DEV = !!process.env.CHARTSHIFT_DEV;
-// Smoke test: open the sample chart, save a screenshot, exit. Used by `npm run smoke`.
+// Test runs (see harness.cjs): smoke checks, or screenshots of the main screens.
 const SMOKE = process.env.CHARTSHIFT_SMOKE;
+const SHOTS = process.env.CHARTSHIFT_SHOTS;
+const TESTING = !!(SMOKE || SHOTS);
 const DIST = path.join(__dirname, '..', 'dist');
 
 const OPEN_FILTERS = [
@@ -24,7 +27,7 @@ const SAVE_KINDS = {
 let win = null;
 let dirty = false;
 
-if (SMOKE) {
+if (TESTING) {
   const scratch = require('fs').mkdtempSync(path.join(os.tmpdir(), 'chartshift-smoke-'));
   app.setPath('userData', path.join(scratch, 'userData'));
   process.env.CHARTSHIFT_LIBRARY = path.join(scratch, 'library');
@@ -33,6 +36,34 @@ if (SMOKE) {
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
 ]);
+
+// Privileged requests are only honoured from the app's own page in the main
+// window's top frame - never from a sub-frame, another window, or a page the
+// window was somehow navigated to.
+function isTrustedSender(event) {
+  const frame = event.senderFrame;
+  return !!win && !!frame && event.sender === win.webContents
+    && frame === win.webContents.mainFrame && safety.isTrustedUrl(frame.url, DEV);
+}
+function handle(channel, listener) {
+  ipcMain.handle(channel, (event, ...args) => {
+    if (!isTrustedSender(event)) throw new Error('Request refused.');
+    return listener(event, ...args);
+  });
+}
+function listen(channel, listener) {
+  ipcMain.on(channel, (event, ...args) => { if (isTrustedSender(event)) listener(event, ...args); });
+}
+
+// Every window and frame: no pop-ups, no leaving the app, no embedded webviews.
+app.on('web-contents-created', (_event, contents) => {
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  const block = (event, url) => { if (!safety.isTrustedUrl(url, DEV)) event.preventDefault(); };
+  contents.on('will-navigate', block);
+  contents.on('will-redirect', block);
+  contents.on('will-frame-navigate', (event) => { if (!safety.isTrustedUrl(event.url, DEV)) event.preventDefault(); });
+  contents.on('will-attach-webview', (event) => event.preventDefault());
+});
 
 function createWindow() {
   win = new BrowserWindow({
@@ -50,10 +81,15 @@ function createWindow() {
       sandbox: true,
     },
   });
-  win.loadURL(DEV ? 'http://localhost:5183' : `app://chartshift/index.html${SMOKE ? '?sample' : ''}`);
-  if (SMOKE) runSmoke();
+  win.loadURL(DEV ? 'http://localhost:5183' : `app://chartshift/index.html${TESTING ? '?sample&debug' : ''}`);
+  if (TESTING) {
+    const harness = require('./harness.cjs');
+    const preload = path.join(__dirname, 'preload.cjs');
+    if (SMOKE) harness.runSmoke(win, { output: SMOKE, withPrintWindow, preload });
+    else harness.runShots(win, { folder: SHOTS });
+  }
   win.on('close', (event) => {
-    if (!dirty) return;
+    if (!dirty || TESTING) return;
     const choice = dialog.showMessageBoxSync(win, {
       type: 'warning',
       buttons: ['Keep editing', 'Close without saving'],
@@ -63,46 +99,16 @@ function createWindow() {
       detail: 'Close ChartShift anyway?',
     });
     if (choice === 0) event.preventDefault();
+    // The user chose to throw the changes away, so do not offer them back next time.
+    else library.clearRecovery();
   });
   win.on('closed', () => { win = null; });
 }
 
-function runSmoke() {
-  const fail = setTimeout(() => { console.error('SMOKE FAIL: sample did not open'); app.exit(1); }, 30000);
-  win.on('page-title-updated', async (_e, title) => {
-    if (!title.startsWith('Sample chart')) return;
-    clearTimeout(fail);
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    const image = await win.webContents.capturePage();
-    await fs.writeFile(SMOKE, image.toPNG());
-    // Exercise the real library and recovery plumbing (in throwaway folders).
-    const report = await win.webContents.executeJavaScript(`(async () => {
-      const lib = window.chartshift.library, rec = window.chartshift.recovery;
-      const bytes = new Uint8Array([80, 75, 5, 6]);
-      await lib.write('Smoke song', bytes);
-      await lib.rename('Smoke song', 'Smoke song 2');
-      await lib.saveSetlist('Smoke set', ['Smoke song 2']);
-      const listed = await lib.list();
-      const back = await lib.read('Smoke song 2');
-      await rec.save({ name: 'x' }, bytes);
-      const parked = await rec.load();
-      await rec.clear();
-      return {
-        status: document.querySelector('[role=status]').textContent,
-        songs: listed.songs.map((s) => s.name), setlists: listed.setlists,
-        readBack: back.length, recovered: parked && parked.meta.name, cleared: (await rec.load()) === null,
-        dir: (await lib.info()).dir,
-      };
-    })()`);
-    console.log('SMOKE OK:', JSON.stringify(report));
-    app.exit(0);
-  });
-}
+listen('dirty', (_e, value) => { dirty = !!value; });
+listen('title', (_e, title) => { if (win) win.setTitle(String(title).slice(0, 200)); });
 
-ipcMain.on('dirty', (_e, value) => { dirty = !!value; });
-ipcMain.on('title', (_e, title) => { if (win) win.setTitle(String(title).slice(0, 200)); });
-
-ipcMain.handle('file:open', async () => {
+handle('file:open', async () => {
   const result = await dialog.showOpenDialog(win, {
     title: 'Open a song, PDF or image',
     defaultPath: app.getPath('documents'),
@@ -111,16 +117,19 @@ ipcMain.handle('file:open', async () => {
   });
   if (result.canceled || !result.filePaths.length) return null;
   const filePath = result.filePaths[0];
+  const { size } = await fs.stat(filePath);
+  if (size > safety.LIMITS.songBytes) throw new Error(`${path.basename(filePath)} is too large to open (over ${Math.round(safety.LIMITS.songBytes / 1048576)} MB).`);
   return { name: path.basename(filePath), data: await fs.readFile(filePath) };
 });
 
 // Files that leave the library (PDFs, ChordPro) always go through a Save dialog.
-ipcMain.handle('file:save', async (_e, { kind, suggestedName, data }) => {
+handle('file:save', async (_e, { kind, suggestedName, data }) => {
   const options = SAVE_KINDS[kind];
   if (!options) throw new Error('Unknown file type.');
+  if (!data || data.byteLength > safety.LIMITS.exportBytes) throw new Error('That file is too large to save.');
   const result = await dialog.showSaveDialog(win, {
     title: options.title,
-    defaultPath: path.join(app.getPath('documents'), suggestedName),
+    defaultPath: path.join(app.getPath('documents'), safety.safeName(path.basename(String(suggestedName)))),
     filters: options.filters,
   });
   if (result.canceled || !result.filePath) return null;
@@ -128,54 +137,54 @@ ipcMain.handle('file:save', async (_e, { kind, suggestedName, data }) => {
   return { name: path.basename(result.filePath) };
 });
 
-library.register(() => win);
+library.register(() => win, handle);
 
 // Printing: lay the page images out in a hidden window and hand it to the
-// normal Windows print dialog, so any installed printer works.
-ipcMain.handle('print', async (_e, pages) => {
+// normal Windows print dialog, so any installed printer works. Sheets may
+// differ in size or orientation; see safety.buildPrintHtml.
+async function withPrintWindow(pages, use) {
+  const sizes = safety.checkPrintPages(pages);
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chartshift-print-'));
-  const inches = (n) => Number(n).toFixed(3) + 'in';
+  let printWin = null;
   try {
-    const blocks = [];
-    for (let i = 0; i < pages.length; i++) {
-      await fs.writeFile(path.join(dir, `page-${i}.png`), Buffer.from(pages[i].png));
-      blocks.push(
-        `<div class="page" style="width:${inches(pages[i].widthIn)};height:${inches(pages[i].heightIn)}">` +
-        `<img src="page-${i}.png" alt=""></div>`,
-      );
-    }
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>ChartShift</title><style>
-      @page { size: ${inches(pages[0].widthIn)} ${inches(pages[0].heightIn)}; margin: 0; }
-      html, body { margin: 0; padding: 0; }
-      .page { break-after: page; overflow: hidden; }
-      .page:last-child { break-after: auto; }
-      img { width: 100%; height: 100%; display: block; }
-    </style></head><body>${blocks.join('')}</body></html>`;
+    for (let i = 0; i < pages.length; i++) await fs.writeFile(path.join(dir, `page-${i}.png`), Buffer.from(pages[i].png));
+    const { html, uniform } = safety.buildPrintHtml(sizes);
     const htmlPath = path.join(dir, 'print.html');
     await fs.writeFile(htmlPath, html);
-
-    const printWin = new BrowserWindow({ show: false, parent: win, webPreferences: { sandbox: true } });
+    printWin = new BrowserWindow({ show: false, parent: win || undefined, webPreferences: { sandbox: true, javascript: false } });
     await printWin.loadURL(pathToFileURL(htmlPath).toString());
-    const outcome = await new Promise((resolve) => {
-      printWin.webContents.print(
-        { silent: false, printBackground: true, margins: { marginType: 'none' } },
-        (success, reason) => resolve({ success, reason }),
-      );
-    });
-    printWin.destroy();
-    return outcome;
+    return await use(printWin, uniform);
   } finally {
+    if (printWin && !printWin.isDestroyed()) printWin.destroy();
     fs.rm(dir, { recursive: true, force: true }).catch(() => {});
   }
-});
+}
+
+handle('print', (_e, pages) => withPrintWindow(pages, (printWin, uniform) => new Promise((resolve) => {
+  const options = { silent: false, printBackground: true, margins: { marginType: 'none' } };
+  if (uniform) {
+    // One sheet size for the whole job: tell the printer exactly which.
+    const short = Math.min(uniform.widthIn, uniform.heightIn), long = Math.max(uniform.widthIn, uniform.heightIn);
+    options.pageSize = { width: Math.round(short * 25400), height: Math.round(long * 25400) };
+    options.landscape = uniform.widthIn > uniform.heightIn;
+  }
+  printWin.webContents.print(options, (success, reason) => resolve({ success, reason }));
+})));
 
 app.whenReady().then(() => {
-  protocol.handle('app', (request) => {
-    const { pathname } = new URL(request.url);
-    const target = path.normalize(path.join(DIST, decodeURIComponent(pathname)));
-    if (!target.startsWith(DIST)) return new Response('Forbidden', { status: 403 });
-    return net.fetch(pathToFileURL(target).toString());
+  protocol.handle('app', async (request) => {
+    const url = new URL(request.url);
+    const target = url.host === 'chartshift' ? safety.resolveAppPath(DIST, url.pathname) : null;
+    if (!target) return new Response('Forbidden', { status: 403 });
+    const response = await net.fetch(pathToFileURL(target).toString());
+    const headers = new Headers(response.headers);
+    headers.set('Content-Security-Policy', safety.CONTENT_SECURITY_POLICY);
+    headers.set('X-Content-Type-Options', 'nosniff');
+    return new Response(response.body, { status: response.status, headers });
   });
+  // The app asks for no camera, microphone, location or similar; refuse them all.
+  session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  session.defaultSession.setPermissionCheckHandler(() => false);
   if (!DEV) Menu.setApplicationMenu(null);
   createWindow();
 });

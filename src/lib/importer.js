@@ -3,6 +3,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { segment } from './segment.js';
 import { estimateSkew, flattenBackground } from './cleanup.js';
 import { applyTokens, rowsFromPdfText } from './textlayer.js';
+import { LIMITS } from './songSchema.js';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -76,14 +77,33 @@ const newNotes = () => ({ scans: 0, whitened: 0, straightened: 0, chords: 0 });
 
 /** @returns {Promise<{pages: object[], notes: object}>} */
 export async function importPdf(data, ids, atlases, onProgress) {
-  const pdf = await pdfjs.getDocument({
+  let pdf;
+  try {
+    pdf = await openPdf(data);
+  } catch (error) {
+    throw new Error(error?.name === 'PasswordException' ? 'This PDF is password-protected. Remove the password and try again.' : 'This PDF could not be read. It may be damaged.');
+  }
+  if (pdf.numPages > LIMITS.pdfPages) {
+    const count = pdf.numPages;
+    await pdf.loadingTask.destroy();
+    throw new Error(`This PDF has ${count} pages. ChartShift opens up to ${LIMITS.pdfPages} at a time; split it into smaller files first.`);
+  }
+  return readPdfPages(pdf, ids, atlases, onProgress);
+}
+
+function openPdf(data) {
+  return pdfjs.getDocument({
     data: data.slice(),
+    isEvalSupported: false,
     cMapUrl: ASSETS + 'cmaps/',
     cMapPacked: true,
     standardFontDataUrl: ASSETS + 'standard_fonts/',
     wasmUrl: ASSETS + 'wasm/',
     iccUrl: ASSETS + 'iccs/',
   }).promise;
+}
+
+async function readPdfPages(pdf, ids, atlases, onProgress) {
   const pages = [];
   const notes = newNotes();
   try {
@@ -92,6 +112,9 @@ export async function importPdf(data, ids, atlases, onProgress) {
       await nextFrame();
       const page = await pdf.getPage(n);
       const base = page.getViewport({ scale: 1 });
+      if (Math.max(base.width, base.height) > LIMITS.pageSide || Math.min(base.width, base.height) < 36) {
+        throw new Error(`Page ${n} of this PDF is an unusual size (${Math.round(base.width / 72)} × ${Math.round(base.height / 72)} inches) that ChartShift cannot open.`);
+      }
       const scale = Math.min(RENDER_DPI / 72, MAX_SIDE / Math.max(base.width, base.height));
       const viewport = page.getViewport({ scale });
       const canvas = document.createElement('canvas');
@@ -130,7 +153,9 @@ export async function importPdf(data, ids, atlases, onProgress) {
 export async function importImage(data, ids, atlases, onProgress) {
   onProgress?.('Reading image…');
   await nextFrame();
-  const bitmap = await createImageBitmap(new Blob([data]));
+  if (data.byteLength > LIMITS.imageBytes) throw new Error('This image is too large to open.');
+  let bitmap;
+  try { bitmap = await createImageBitmap(new Blob([data])); } catch { throw new Error('This image could not be read. It may be damaged or of an unsupported type.'); }
   const landscape = bitmap.width > bitmap.height;
   const w = landscape ? LETTER.h : LETTER.w;
   const h = landscape ? LETTER.w : LETTER.h;

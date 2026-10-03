@@ -1,15 +1,16 @@
 import { fontCss, LINE_HEIGHT } from './text.js';
 
-const SELECT_FILL = 'rgba(37, 99, 235, 0.18)';
-const SELECT_STROKE = '#1d4ed8';
+// Keep in step with the tokens in styles.css (--accent, --verse, --chorus…).
+const SELECT_FILL = 'rgba(36, 86, 214, 0.16)';
+const SELECT_STROKE = '#2456d6';
 const GUIDE = '#db2777';
-const CHORD_MARK = '#047857';
+const CHORD_MARK = '#0f7a52';
 
 export function sectionColor(label) {
-  if (/^verse/i.test(label)) return '#1d4ed8';
-  if (/^(chorus|refrain)/i.test(label)) return '#047857';
-  if (/^(bridge|pre)/i.test(label)) return '#b45309';
-  return '#6b21a8';
+  if (/^verse/i.test(label)) return '#2563a8';
+  if (/^(chorus|refrain)/i.test(label)) return '#0f7a52';
+  if (/^(bridge|pre)/i.test(label)) return '#a8540a';
+  return '#6b3fa0';
 }
 
 // Where a piece is right now, including an in-progress drag or resize.
@@ -133,7 +134,7 @@ export function drawPage(ctx, page, atlases, view) {
   if (marquee && marquee.page === pageIndex) {
     const x = Math.min(marquee.x0, marquee.x1), y = Math.min(marquee.y0, marquee.y1);
     const w = Math.abs(marquee.x1 - marquee.x0), h = Math.abs(marquee.y1 - marquee.y0);
-    ctx.fillStyle = 'rgba(37, 99, 235, 0.08)';
+    ctx.fillStyle = 'rgba(36, 86, 214, 0.08)';
     ctx.fillRect(x, y, w, h);
     ctx.strokeStyle = SELECT_STROKE;
     ctx.lineWidth = px;

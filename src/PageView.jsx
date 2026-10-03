@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { drawPage } from './lib/render.js';
 import { fontCss, LINE_HEIGHT, measureText } from './lib/text.js';
+import { Icon } from './icons.jsx';
+import { IconButton } from './ui.jsx';
 
 const DRAG_START_PX = 3;
 const SNAP_PX = 5;
@@ -236,10 +238,10 @@ export function PageView({ editor, state, page, index, pageCount }) {
       <header className="page-bar">
         <h2>{label} of {pageCount}</h2>
         <div className="page-actions">
-          <button type="button" onClick={() => editor.addPage(index)} aria-label={`Add a blank page after page ${index + 1}`}>Add page below</button>
-          <button type="button" onClick={() => editor.movePage(index, -1)} disabled={index === 0} aria-label={`Move page ${index + 1} up`}>Move up</button>
-          <button type="button" onClick={() => editor.movePage(index, 1)} disabled={index === pageCount - 1} aria-label={`Move page ${index + 1} down`}>Move down</button>
-          <button type="button" onClick={() => editor.deletePage(index)} disabled={pageCount < 2} aria-label={`Delete page ${index + 1}`}>Delete page</button>
+          <button type="button" className="btn" onClick={() => editor.addPage(index)} aria-label={`Add a blank page after page ${index + 1}`}><Icon name="plus" size={14} />Add page</button>
+          <IconButton icon="arrowUp" label={`Move page ${index + 1} up`} onClick={() => editor.movePage(index, -1)} disabled={index === 0} />
+          <IconButton icon="arrowDown" label={`Move page ${index + 1} down`} onClick={() => editor.movePage(index, 1)} disabled={index === pageCount - 1} />
+          <IconButton icon="trash" label={`Delete page ${index + 1}`} onClick={() => editor.deletePage(index)} disabled={pageCount < 2} />
         </div>
       </header>
       <div className="sheet" style={{ width: page.w * zoom, height: page.h * zoom }}>

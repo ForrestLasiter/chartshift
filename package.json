@@ -1,6 +1,6 @@
 {
   "name": "chartshift",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "ChartShift - rearrange chord charts, tabs and sheet music PDFs: move lines, words and letters, add text, then save or print.",
   "main": "electron/main.cjs",
   "type": "module",
@@ -14,7 +14,8 @@
     "build": "npm run assets && vite build",
     "test": "node --test",
     "sample": "node scripts/make-sample.mjs",
-    "smoke": "npm run build && cross-env CHARTSHIFT_SMOKE=smoke.png electron .",
+    "smoke": "npm run build && node scripts/check-smoke.mjs",
+    "shots": "npm run build && cross-env CHARTSHIFT_SHOTS=screenshots electron .",
     "pack": "npm run build && electron-builder --dir",
     "dist:win": "npm run build && electron-builder --win --publish never"
   },
