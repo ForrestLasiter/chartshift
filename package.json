@@ -1,0 +1,63 @@
+{
+  "name": "chartshift",
+  "version": "0.1.0",
+  "description": "ChartShift - rearrange chord charts, tabs and sheet music PDFs: move lines, words and letters, add text, then save or print.",
+  "main": "electron/main.cjs",
+  "type": "module",
+  "author": "Forrest Lasiter",
+  "license": "MIT",
+  "scripts": {
+    "assets": "node scripts/copy-pdfjs-assets.mjs",
+    "start": "npm run build && electron .",
+    "dev": "npm run assets && concurrently -k \"vite\" \"wait-on tcp:5183 && cross-env CHARTSHIFT_DEV=1 electron .\"",
+    "web": "npm run assets && vite",
+    "build": "npm run assets && vite build",
+    "test": "node --test",
+    "sample": "node scripts/make-sample.mjs",
+    "smoke": "npm run build && cross-env CHARTSHIFT_SMOKE=smoke.png electron .",
+    "pack": "npm run build && electron-builder --dir",
+    "dist:win": "npm run build && electron-builder --win --publish never"
+  },
+  "build": {
+    "appId": "com.forrestlasiter.chartshift",
+    "productName": "ChartShift",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      "assets/icon.png",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "dependencies": {
+    "jszip": "^3.10.2"
+  },
+  "devDependencies": {
+    "@tesseract.js-data/eng": "^1.0.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "concurrently": "^10.0.5",
+    "cross-env": "^10.1.0",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.4.299",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tesseract.js": "^7.0.0",
+    "vite": "^8.3.2",
+    "wait-on": "^9.5.1"
+  }
+}
