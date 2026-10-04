@@ -76,3 +76,60 @@ test('sprites carry only their own ink, with paper made transparent', () => {
   assert.equal(alphaAt(0, 0), 255);
   assert.equal(a.data[3], 0, 'atlas padding is transparent');
 });
+
+test('lines stay inside their own column, and a title across the page stays whole', () => {
+  const { img, rect } = blankPage(900, 700);
+  // A title that runs across the gutter.
+  drawLine(rect, 60, 30, [4, 5, 6, 6, 5, 6, 6, 5]);
+  // Left column rows, and right column rows half a row lower.
+  const leftRows = [], rightRows = [];
+  for (let i = 0; i < 16; i++) {
+    const y = 100 + i * 34;
+    drawLine(rect, 60, y, [3, 3, 5, 6]);
+    drawLine(rect, 520, y + 7, [5, 2, 3, 6]);
+    leftRows.push(y);
+    rightRows.push(y + 7);
+  }
+  const { pieces } = segment(img);
+  const lineOf = (x, y) => pieces.find((p) => p.x >= x - 1 && p.x <= x + 1 && p.y >= y - 1 && p.y <= y + 1).line;
+  for (let i = 0; i < 16; i++) {
+    const left = lineOf(60, leftRows[i]), right = lineOf(520, rightRows[i]);
+    assert.notEqual(left, right, `row ${i}: the two columns are separate lines`);
+    const inLeft = pieces.filter((p) => p.line === left), inRight = pieces.filter((p) => p.line === right);
+    assert.ok(inLeft.every((p) => p.x < 450) && inLeft.length === 17, `row ${i}: left line holds only left-column letters`);
+    assert.ok(inRight.every((p) => p.x > 450) && inRight.length === 16, `row ${i}: right line holds only right-column letters`);
+  }
+  const title = pieces.filter((p) => p.y < 60);
+  assert.equal(new Set(title.map((p) => p.line)).size, 1, 'the title is one line although it crosses the gutter');
+  assert.ok(Math.max(...title.map((p) => p.x)) > 450 && Math.min(...title.map((p) => p.x)) < 100);
+});
+
+test('a single column with gaps inside its lines is not split', () => {
+  const { img, rect } = blankPage(900, 400);
+  for (let i = 0; i < 8; i++) {
+    drawLine(rect, 60, 40 + i * 40, [1]);            // chord
+    drawLine(rect, 500, 40 + i * 40, [2]);           // chord far to the right
+    drawLine(rect, 60, 56 + i * 40, [3, 3, 5, 6, 2, 3, 5, 6, 4, 4, 6, 3, 5]);
+  }
+  const { pieces } = segment(img);
+  const chordRow = pieces.filter((p) => p.y >= 39 && p.y <= 41);
+  assert.equal(new Set(chordRow.map((p) => p.line)).size, 1, 'far-apart chords on one row are still one line');
+});
+
+test('pale rules and pale text are kept; the soft edges of dark letters are not', () => {
+  const { img, rect } = blankPage(600, 300);
+  rect(40, 60, 520, 2, 204);                       // a light grey rule
+  for (let i = 0; i < 6; i++) rect(440 + i * 14, 260, 9, 12, 190);   // pale footer text
+  drawLine(rect, 40, 100, [4, 3]);                 // normal dark text…
+  for (let i = 0; i < 4; i++) {                    // …with a soft grey edge around each letter
+    const x = 40 + i * 11;
+    rect(x - 1, 99, 10, 1, 200); rect(x - 1, 112, 10, 1, 200);
+  }
+  const before = segment(img, { faint: false }).pieces;
+  const { pieces } = segment(img);
+  const rule = pieces.find((p) => p.w > 500);
+  assert.ok(rule && rule.h <= 4, 'the rule is a piece');
+  assert.equal(pieces.filter((p) => p.y >= 255).length, 6, 'each pale footer letter is a piece');
+  assert.equal(pieces.filter((p) => p.y > 90 && p.y < 120).length, 7, 'dark letters are unchanged: no extra pieces from their edges');
+  assert.equal(before.filter((p) => p.w > 500).length + before.filter((p) => p.y >= 255).length, 0, 'with faint off, pale marks are dropped as before');
+});

@@ -2,7 +2,7 @@ import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { segment } from './segment.js';
 import { estimateSkew, flattenBackground } from './cleanup.js';
-import { applyTokens, rowsFromPdfText } from './textlayer.js';
+import { applyTokens, rowsFromPdfText, unreadWords } from './textlayer.js';
 import { LIMITS } from './songSchema.js';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -20,6 +20,7 @@ function cleanScan(canvas, ctx, notes) {
   if (flattenBackground(img)) {
     ctx.putImageData(img, 0, 0);
     notes.whitened++;
+    notes.uneven = true;
   }
   const angle = estimateSkew(img);
   if (angle) {
@@ -44,8 +45,11 @@ function cleanScan(canvas, ctx, notes) {
 // Splits a rendered page into pieces and appends its sprite atlases to `atlases`.
 function pageFromCanvas(canvas, w, h, ids, atlases, scan, notes) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  notes.uneven = false;
   const img = scan ? cleanScan(canvas, ctx, notes) : ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const result = segment(img, { speckScale: scan ? 2 : 1 });
+  // Pale marks (grey rules, footers) are kept unless the page is a photographed
+  // or unevenly lit scan, where pale patches are shadows rather than content.
+  const result = segment(img, { speckScale: scan ? 2 : 1, faint: !notes.uneven });
   const s = canvas.width / w;
   const atlasBase = atlases.length;
   for (const a of result.atlases) {
@@ -73,7 +77,7 @@ function pageFromCanvas(canvas, w, h, ids, atlases, scan, notes) {
   return { id: ids.page++, w, h, pieces, sections: [] };
 }
 
-const newNotes = () => ({ scans: 0, whitened: 0, straightened: 0, chords: 0 });
+const newNotes = () => ({ scans: 0, whitened: 0, straightened: 0, chords: 0, missed: 0 });
 
 /** @returns {Promise<{pages: object[], notes: object}>} */
 export async function importPdf(data, ids, atlases, onProgress) {
@@ -139,6 +143,8 @@ async function readPdfPages(pdf, ids, atlases, onProgress) {
         }
         const rows = rowsFromPdfText(textContent, base.transform, pdfjs.Util.transform, fontNames);
         notes.chords += applyTokens(out.pieces, rows, ids).chords;
+        const unread = unreadWords(out.pieces);
+        if (unread >= 3) notes.missed += unread;
       }
       pages.push(out);
       page.cleanup();

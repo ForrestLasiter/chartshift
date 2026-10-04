@@ -211,13 +211,58 @@ export function installMusic(ed) {
     const pages = state().pages.map((page, i) => {
       if (!rowsByPage[i]?.length) return page;
       const pieces = page.pieces.map((p) => ({ ...p }));
-      const found = applyTokens(pieces, rowsByPage[i], ed.ids, { uncertain: true });
+      // Text the PDF already provided is kept; OCR only fills in the rest.
+      const found = applyTokens(pieces, rowsByPage[i], ed.ids, { uncertain: true, onlyUnread: true });
       tokens += found.tokens;
       chords += found.chords;
       return { ...page, pieces };
     });
     ed.commit(pages, { status: `Read ${tokens} words and found ${chords} chords. Check them before transposing.` });
     return { tokens, chords };
+  };
+
+  /** An enlarged picture of a chord's pieces on white, for reading it again. */
+  ed.chordPicture = (entry, height = 48, pad = 24) => {
+    const b = boundsOf(entry.pieces);
+    const scale = height / Math.max(b.h, 1);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(b.w * scale) + pad * 2;
+    canvas.height = height + pad * 2;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.imageSmoothingQuality = 'high';
+    for (const p of entry.pieces) {
+      if (p.kind === 'clip') ctx.drawImage(ed.atlases[p.atlas], p.sx, p.sy, p.sw, p.sh, pad + (p.x - b.x) * scale, pad + (p.y - b.y) * scale, p.w * scale, p.h * scale);
+    }
+    return canvas;
+  };
+
+  /**
+   * Settles chords that were marked but could not be read ("?").
+   * results: Map(key -> { chord: 'C' } | { word: 'working' } | null).
+   * A chord gets its name; a word turns out not to be a chord; null stays "?".
+   */
+  ed.settleUnknownChords = (results) => {
+    const byId = new Map();
+    for (const entry of ed.chordList()) {
+      const result = results.get(entry.key);
+      if (result) entry.ids.forEach((id) => byId.set(id, result));
+    }
+    if (!byId.size) return 0;
+    const pages = state().pages.map((page) => {
+      if (!page.pieces.some((p) => byId.has(p.id))) return page;
+      return { ...page, pieces: page.pieces.map((p) => {
+        const result = byId.get(p.id);
+        if (!result) return p;
+        if (result.chord) return { ...p, chord: result.chord, t: result.chord };
+        const { chord, ...rest } = p;
+        return { ...rest, t: result.word };
+      }) };
+    });
+    // Part of the same "read text" step: no separate undo entry.
+    ed.set({ pages });
+    return results.size;
   };
 
   ed.fitOnePage = () => {

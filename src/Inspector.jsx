@@ -2,6 +2,7 @@
 // actions up front and the rarely used ones folded away.
 import { useId, useState } from 'react';
 import { KEY_CHOICES, keyName } from './lib/chords.js';
+import { unreadWords } from './lib/textlayer.js';
 import { Icon } from './icons.jsx';
 import { IconButton, Menu, TabPanel, Tabs } from './ui.jsx';
 
@@ -89,6 +90,8 @@ function Chords({ editor, state, onReadText, onReview }) {
     const clips = page.pieces.filter((p) => p.kind === 'clip');
     return clips.length > 0 && clips.filter((p) => p.t).length < clips.length / 2;
   });
+  // Words on an otherwise readable page that have no text (the PDF did not provide any).
+  const missed = !unread && state.pages.some((page) => unreadWords(page.pieces) >= 3);
   const toKey = () => {
     if (target === '' || !key) return;
     let steps = (Number(target) - key.index + 12) % 12;
@@ -105,6 +108,12 @@ function Chords({ editor, state, onReadText, onReview }) {
           <div className="callout">
             <p>This looks like a scan. Read its text so the chords can be found.</p>
             <button type="button" className="btn primary block" onClick={onReadText}><Icon name="scan" />Read text from scan</button>
+          </div>
+        )}
+        {missed && (
+          <div className="callout">
+            <p>Some words on the page have no text behind them, so chords among them cannot be found.</p>
+            <button type="button" className="btn outline block" onClick={onReadText}><Icon name="scan" />Read the missed text</button>
           </div>
         )}
         <button type="button" className="btn outline block" onClick={onReview} disabled={none}>Check the chords…</button>

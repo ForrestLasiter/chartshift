@@ -113,7 +113,9 @@ export function App() {
       notes.whitened && `whitened the paper on ${plural(notes.whitened, 'page')}`,
       notes.chords && `found ${plural(notes.chords, 'chord')}`,
     ].filter(Boolean);
-    const hint = notes.scans ? ' This is a scan: use “Read text from scan” before transposing.' : '';
+    const hint = notes.scans ? ' This is a scan: use “Read text from scan” before transposing.'
+      : notes.missed ? ` ${notes.missed} words have no text in this PDF, so chords among them were not found: use “Read the missed text” on the Chords tab.` : '';
+    if (notes.missed) setInspectorTab('chords');
     showDoc({
       pages: imported, atlases, ids, name,
       status: `Opened ${file.name}: ${plural(imported.length, 'page')}, ${count} movable pieces${extras.length ? `; ${extras.join(', ')}` : ''}.${hint}`,
@@ -226,14 +228,33 @@ export function App() {
     const rows = [];
     for (let i = 0; i < st.pages.length; i++) {
       const page = st.pages[i];
-      const clips = page.pieces.filter((p) => p.kind === 'clip');
-      if (!clips.length || clips.filter((p) => p.t).length >= clips.length / 2) { rows.push(null); continue; }
+      // Pages that already have all their text are skipped; OCR only fills in what is missing.
+      const clips = page.pieces.filter((p) => p.kind === 'clip' && !p.frame && !p.contained);
+      if (!clips.length || clips.every((p) => p.t)) { rows.push(null); continue; }
       progress(`Reading text on page ${i + 1} of ${st.pages.length}… (the first time takes a little longer)`);
       rows.push(await recognise(renderPageCanvas(page, editor.atlases, OCR_DPI), OCR_DPI / 72));
     }
-    const found = editor.applyRecognisedText(rows);
+    editor.applyRecognisedText(rows);
+    // Chords that were spotted but not read get a second, closer look.
+    const unknown = editor.chordList().filter((c) => c.text === '?');
+    if (unknown.length) {
+      const { readWord } = await import('./lib/ocr.js');
+      const { repairChord } = await import('./lib/textlayer.js');
+      const results = new Map();
+      for (const [n, entry] of unknown.entries()) {
+        progress(`Taking a closer look at chord ${n + 1} of ${unknown.length}…`);
+        const readings = await readWord(editor.chordPicture(entry));
+        const chord = readings.map(repairChord).find(Boolean);
+        const word = readings.find((r) => /^[\p{L}'’,.!?-]{3,}$/u.test(r));
+        results.set(entry.key, chord ? { chord } : word ? { word } : null);
+      }
+      editor.settleUnknownChords(results);
+    }
+    const chords = editor.chordList();
+    const unsure = chords.filter((c) => c.text === '?').length;
+    editor.set({ status: `Found ${chords.length} chords.${unsure ? ` ${unsure} could not be read and are marked “?”: fix them in “Check the chords”.` : ' Check them before transposing.'}` });
     setInspectorTab('chords');
-    if (found.chords) setDialog('review');
+    if (chords.length) setDialog('review');
   }), [editor, run]);
 
   const loadSetlist = useCallback(async (setlist, progress) => {

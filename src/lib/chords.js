@@ -52,6 +52,9 @@ export function parseChord(text) {
 
 export const isChord = (text) => !!parseChord(text);
 
+/** Bar lines, repeat marks and the like: allowed on a chord line without being chords. */
+export const isNeutral = (text) => NEUTRAL_RE.test(text);
+
 /** True when a row of words reads as a chord line rather than lyrics. */
 export function isChordLine(tokens) {
   let chords = 0, words = 0;

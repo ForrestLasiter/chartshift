@@ -69,7 +69,7 @@ const checks = {
   'navigation away is blocked': () => assert.match(report.urlAfterNavigation, /^app:\/\/chartshift\//),
   'a second window gets no IPC access': () => assert.equal(report.otherWindow, 'refused'),
   'mixed page sizes print as separate sheet sizes': () => assert.deepEqual(report.mixedPrint, ['612x792', '792x612', '420x595', '612x792']),
-  'OCR works under the CSP': () => assert.match(report.ocr || '', /^Read \d+ words and found \d+ chords/),
+  'OCR works under the CSP and finds every chord on the sample': () => assert.match(report.ocr || '', /^Found 20 chords\. Check them/),
 };
 let failed = 0;
 for (const [name, check] of Object.entries(checks)) {

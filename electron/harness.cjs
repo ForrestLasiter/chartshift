@@ -225,7 +225,7 @@ function runSmoke(win, { output, withPrintWindow, preload }) {
       while (Date.now() < deadline) {
         await sleep(500);
         const status = await page(`document.querySelector('[role=status]').textContent`);
-        if (/^Read \d+ words/.test(status) || /could not|wrong|failed/i.test(status)) { report.ocr = status; break; }
+        if (/^Found \d+ chords/.test(status) || /could not open|wrong|failed/i.test(status)) { report.ocr = status; break; }
       }
     }
     console.log('SMOKE REPORT:' + JSON.stringify(report));

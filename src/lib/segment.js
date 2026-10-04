@@ -113,12 +113,171 @@ function clusterLines(items, hm) {
 }
 
 /**
+ * Labels the connected regions (8-connectivity, two-pass union-find) of the
+ * pixels set in `mask`. Writes 1-based component numbers into `labels` and
+ * appends { x0, y0, x1, y1, area } to `comps`; numbering continues from the
+ * components already in `comps`, so it can be called for a second mask.
+ */
+function labelComponents(mask, W, H, labels, comps) {
+  const base = comps.length;
+  const local = new Int32Array(W * H);
+  let parent = new Int32Array(1 << 16);
+  let next = 1;
+  const find = (x) => {
+    while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+    return x;
+  };
+  for (let y = 0, i = 0; y < H; y++) {
+    for (let x = 0; x < W; x++, i++) {
+      if (!mask[i]) continue;
+      let l = x > 0 ? local[i - 1] : 0;
+      if (y > 0) {
+        const up = i - W;
+        for (let k = (x > 0 ? -1 : 0); k <= (x < W - 1 ? 1 : 0); k++) {
+          const n = local[up + k];
+          if (!n) continue;
+          if (!l) { l = n; continue; }
+          if (n !== l) {
+            const ra = find(l), rb = find(n);
+            if (ra !== rb) { if (ra < rb) parent[rb] = ra; else parent[ra] = rb; }
+          }
+        }
+      }
+      if (!l) {
+        if (next >= parent.length) {
+          const grown = new Int32Array(parent.length * 2);
+          grown.set(parent);
+          parent = grown;
+        }
+        l = next;
+        parent[next] = next;
+        next++;
+      }
+      local[i] = l;
+    }
+  }
+  const compOf = new Int32Array(next);
+  for (let y = 0, i = 0; y < H; y++) {
+    for (let x = 0; x < W; x++, i++) {
+      const l = local[i];
+      if (!l) continue;
+      const r = find(l);
+      let ci = compOf[r];
+      if (!ci) {
+        comps.push({ x0: x, y0: y, x1: x, y1: y, area: 0 });
+        ci = compOf[r] = comps.length - base;
+      }
+      const c = comps[base + ci - 1];
+      if (x < c.x0) c.x0 = x;
+      if (x > c.x1) c.x1 = x;
+      if (y > c.y1) c.y1 = y;
+      c.area++;
+      labels[i] = base + ci;
+    }
+  }
+}
+
+// A copy of `mask` grown by `radius` pixels in every direction.
+function dilated(mask, W, H, radius) {
+  const rows = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) {
+    const o = y * W;
+    let reach = -1;
+    for (let x = 0; x < W; x++) { if (mask[o + x]) reach = x + radius; if (x <= reach) rows[o + x] = 1; }
+    reach = W;
+    for (let x = W - 1; x >= 0; x--) { if (mask[o + x]) reach = x - radius; if (x >= reach) rows[o + x] = 1; }
+  }
+  const out = new Uint8Array(W * H);
+  for (let x = 0; x < W; x++) {
+    let reach = -1;
+    for (let y = 0; y < H; y++) { if (rows[y * W + x]) reach = y + radius; if (y <= reach) out[y * W + x] = 1; }
+    reach = H;
+    for (let y = H - 1; y >= 0; y--) { if (rows[y * W + x]) reach = y - radius; if (y >= reach) out[y * W + x] = 1; }
+  }
+  return out;
+}
+
+// Finds the empty vertical strips between columns of text. A strip counts
+// when almost nothing crosses it (a title running across the page is allowed),
+// it is clearly wider than a word space, and there is real content on both
+// sides. Returns the x position of the middle of each strip.
+function findGutters(items, pageWidth, hm) {
+  if (items.length < 12) return [];
+  const diff = new Float64Array(pageWidth + 2);
+  for (const c of items) { diff[c.x0] += c.h; diff[c.x1 + 1] -= c.h; }
+  const cover = new Float64Array(pageWidth + 1);
+  let acc = 0, peak = 0, first = -1, last = -1;
+  for (let x = 0; x <= pageWidth; x++) {
+    acc += diff[x];
+    cover[x] = acc;
+    if (acc > peak) peak = acc;
+    if (acc > 0.5) { if (first < 0) first = x; last = x; }
+  }
+  const limit = peak * 0.08;
+  const minWidth = Math.max(3.5 * hm, 0.02 * pageWidth);
+  const gutters = [];
+  let start = -1;
+  for (let x = first; x <= last + 1; x++) {
+    const empty = x <= last && cover[x] <= limit;
+    if (empty && start < 0) start = x;
+    if (!empty && start >= 0) {
+      if (x - start >= minWidth) {
+        const middle = (start + x) / 2;
+        let left = 0, right = 0;
+        for (const c of items) { if ((c.x0 + c.x1) / 2 < middle) left++; else right++; }
+        if (left >= items.length * 0.15 && right >= items.length * 0.15) gutters.push(middle);
+      }
+      start = -1;
+    }
+  }
+  return gutters;
+}
+
+// Lines for free-standing text. On a page set in columns, rows of different
+// columns rarely sit at exactly the same height, so each column gets its own
+// lines; a line that genuinely runs across a gutter (a title) is joined up.
+function linesInColumns(items, hm, pageWidth) {
+  const gutters = findGutters(items, pageWidth, hm);
+  if (!gutters.length) return clusterLines(items, hm);
+  const groups = Array.from({ length: gutters.length + 1 }, () => []);
+  for (const c of items) {
+    const cx = (c.x0 + c.x1) / 2;
+    let k = 0;
+    while (k < gutters.length && cx > gutters[k]) k++;
+    groups[k].push(c);
+  }
+  const lines = [];
+  groups.forEach((group, k) => {
+    for (const R of clusterLines(group, hm)) {
+      const L = k === 0 ? null : lines.find((l) => {
+        if (l.column !== k - 1) return false;
+        const overlap = Math.min(l.y1, R.y1) - Math.max(l.y0, R.y0) + 1;
+        return overlap >= 0.6 * Math.min(l.y1 - l.y0 + 1, R.y1 - R.y0 + 1) && R.x0 - l.x1 < 1.5 * hm;
+      });
+      if (L) {
+        L.items.push(...R.items);
+        L.x1 = Math.max(L.x1, R.x1);
+        L.y0 = Math.min(L.y0, R.y0);
+        L.y1 = Math.max(L.y1, R.y1);
+        L.column = k;
+      } else {
+        R.column = k;
+        lines.push(R);
+      }
+    }
+  });
+  return lines;
+}
+
+/**
  * @param {{data: Uint8ClampedArray, width: number, height: number}} img
  * @returns {{atlases: {width:number,height:number,data:Uint8ClampedArray}[], pieces: object[], stats: object}}
  *   pieces are in source pixels: {x,y,w,h, atlas,sx,sy, word,line,block, frame?, contained?}
  *   `speckScale` raises the size below which stray dots are dropped (for scans).
+ *   `faint` keeps pale marks (grey rules, footers); turn it off for photographed
+ *   or unevenly lit scans, where pale patches are shadows rather than content.
  */
-export function segment(img, { speckScale = 1 } = {}) {
+export function segment(img, { speckScale = 1, faint = true } = {}) {
   const { width: W, height: H, data } = img;
   const N = W * H;
 
@@ -145,61 +304,27 @@ export function segment(img, { speckScale = 1 } = {}) {
   for (let acc = 0; inkLo < T; inkLo++) { acc += hist[inkLo]; if (acc >= inkCount * 0.25) break; }
   inkLo = Math.min(inkLo, bg - 10);
 
-  // 2. Connected components (8-connectivity, two-pass union-find).
+  // 2. Connected components of solid ink.
   const labels = new Int32Array(N);
-  let parent = new Int32Array(1 << 16);
-  let next = 1;
-  const find = (x) => {
-    while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; }
-    return x;
-  };
-  for (let y = 0, i = 0; y < H; y++) {
-    for (let x = 0; x < W; x++, i++) {
-      if (v[i] >= T) continue;
-      let l = x > 0 ? labels[i - 1] : 0;
-      if (y > 0) {
-        const up = i - W;
-        for (let k = (x > 0 ? -1 : 0); k <= (x < W - 1 ? 1 : 0); k++) {
-          const n = labels[up + k];
-          if (!n) continue;
-          if (!l) { l = n; continue; }
-          if (n !== l) {
-            const ra = find(l), rb = find(n);
-            if (ra !== rb) { if (ra < rb) parent[rb] = ra; else parent[ra] = rb; }
-          }
-        }
-      }
-      if (!l) {
-        if (next >= parent.length) {
-          const grown = new Int32Array(parent.length * 2);
-          grown.set(parent);
-          parent = grown;
-        }
-        l = next;
-        parent[next] = next;
-        next++;
-      }
-      labels[i] = l;
-    }
-  }
-  const compOf = new Int32Array(next);
   const comps = [];
-  for (let y = 0, i = 0; y < H; y++) {
-    for (let x = 0; x < W; x++, i++) {
-      const l = labels[i];
-      if (!l) continue;
-      const r = find(l);
-      let ci = compOf[r];
-      if (!ci) {
-        comps.push({ x0: x, y0: y, x1: x, y1: y, area: 0 });
-        ci = compOf[r] = comps.length;
-      }
-      const c = comps[ci - 1];
-      if (x < c.x0) c.x0 = x;
-      if (x > c.x1) c.x1 = x;
-      if (y > c.y1) c.y1 = y;
-      c.area++;
-      labels[i] = ci;
+  const solid = new Uint8Array(N);
+  for (let i = 0; i < N; i++) if (v[i] < T) solid[i] = 1;
+  labelComponents(solid, W, H, labels, comps);
+
+  // 2b. Faint marks: light grey rules, footers and pale text that are clearly
+  //     darker than the paper but lighter than the ink threshold. They are
+  //     looked for only away from solid ink, so the soft edges of letters
+  //     never turn into pieces of their own.
+  const faintLevel = bg - 40;
+  if (faint && faintLevel > T + 16) {
+    const near = dilated(solid, W, H, 3);
+    const pale = new Uint8Array(N);
+    let any = false;
+    for (let i = 0; i < N; i++) if (!near[i] && v[i] < faintLevel) { pale[i] = 1; any = true; }
+    if (any) {
+      const firstFaint = comps.length;
+      labelComponents(pale, W, H, labels, comps);
+      for (let i = firstFaint; i < comps.length; i++) comps[i].faint = true;
     }
   }
 
@@ -211,7 +336,7 @@ export function segment(img, { speckScale = 1 } = {}) {
     c.index = i;
     c.w = c.x1 - c.x0 + 1;
     c.h = c.y1 - c.y0 + 1;
-    if (c.area >= minArea) kept.push(c);
+    if (c.area >= (c.faint ? 6 * minArea : minArea)) kept.push(c);
   }
   if (!kept.length) return empty;
   const hm = typicalHeight(kept, W);
@@ -248,7 +373,7 @@ export function segment(img, { speckScale = 1 } = {}) {
     letters.push({ comps: [k], x0: k.x0, y0: k.y0, x1: k.x1, y1: k.y1, line: ++lineId, word: ++wordId, block: k.block, frame: k.frame, container: true });
   }
   for (const [host, members] of membersOf) {
-    for (const L of clusterLines(members, hm)) {
+    for (const L of (host ? clusterLines(members, hm) : linesInColumns(members, hm, W))) {
       L.id = ++lineId;
       L.items.sort((a, b) => a.x0 - b.x0);
       const lh = median(L.items.filter((c) => c.h >= 0.4 * hm).map((c) => c.h), hm);

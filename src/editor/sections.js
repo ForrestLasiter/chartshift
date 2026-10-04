@@ -126,8 +126,9 @@ export function installSections(ed) {
         const key = p.kind === 'text' ? `t${p.id}` : p.t ? `l${p.line}` : null;
         if (!key) continue;
         let row = rows.get(key);
-        if (!row) rows.set(key, (row = { top: p.y, words: new Map() }));
+        if (!row) rows.set(key, (row = { top: p.y, left: p.x, words: new Map() }));
         row.top = Math.min(row.top, p.y);
+        row.left = Math.min(row.left, p.x);
         if (p.kind === 'text') row.words.set(p.id, [p.x, p.text.split('\n')[0]]);
         else if (!row.words.has(p.tok)) row.words.set(p.tok, [p.x, p.t]);
       }
@@ -135,15 +136,34 @@ export function installSections(ed) {
       for (const row of rows.values()) {
         const words = [...row.words.values()].sort((a, b) => a[0] - b[0]).map((w) => w[1]);
         const label = words.length <= 6 ? sectionLabel(words.join(' ')) : null;
-        if (label) headers.push({ top: row.top, label });
+        if (label) headers.push({ top: row.top, left: row.left, label });
       }
       if (!headers.length) return page;
+      // Charts are often set in columns. Headings that start at clearly
+      // different places across the page mark separate columns, and a section
+      // only takes pieces from its own column.
+      const starts = [...new Set(headers.map((h) => h.left))].sort((a, b) => a - b);
+      const columns = [];
+      for (const x of starts) if (!columns.length || x - columns[columns.length - 1] > page.w * 0.2) columns.push(x);
+      const columnOf = (x) => {
+        let c = 0;
+        while (c + 1 < columns.length && x >= columns[c + 1] - page.w * 0.03) c++;
+        return c;
+      };
       headers.sort((a, b) => a.top - b.top);
-      headers.forEach((h, i) => { h.id = ed.ids.group++; h.end = headers[i + 1]?.top ?? Infinity; });
+      for (const h of headers) {
+        h.id = ed.ids.group++;
+        h.column = columnOf(h.left);
+        h.end = Infinity;
+      }
+      for (const h of headers) {
+        const next = headers.find((o) => o.column === h.column && o.top > h.top);
+        if (next) h.end = next.top;
+      }
       const pieces = page.pieces.map((p) => {
         if (p.frame) return p;
-        const middle = p.y + p.h / 2;
-        const header = headers.find((h) => middle >= h.top - 1 && middle < h.end - 1);
+        const middle = p.y + p.h / 2, column = columnOf(p.x + p.w / 2);
+        const header = headers.find((h) => h.column === column && middle >= h.top - 1 && middle < h.end - 1);
         return header ? { ...p, section: header.id } : p;
       });
       made += headers.length;
