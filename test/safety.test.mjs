@@ -5,7 +5,7 @@ import path from 'node:path';
 import safety from '../electron/safety.cjs';
 import { createRecoveryQueue } from '../src/lib/recoveryQueue.js';
 import { LIMITS, checkAtlasPng, checkSongEntries, pngSize, validateSong } from '../src/lib/songSchema.js';
-import { PAPERS, isMixed, nearestPaper, pageSizes, planPrint } from '../src/lib/printPlan.js';
+import { PAPERS, defaultChoice, describeSheet, isMixed, nearestPaper, pageSizes, placeOnSheet, planPrint } from '../src/lib/printPlan.js';
 
 // --- 1. Electron: trusted origins --------------------------------------------
 
@@ -329,4 +329,40 @@ test('print requests are bounded and validated', () => {
   assert.throws(() => safety.checkPrintPages([{ png, widthIn: 500, heightIn: 11 }]), /cannot be printed/);
   assert.throws(() => safety.checkPrintPages([{ widthIn: 8.5, heightIn: 11 }]), /too large/);
   assert.throws(() => safety.checkPrintPages(Array(safety.LIMITS.printPages + 1).fill({ png, widthIn: 8.5, heightIn: 11 })), /limited to/);
+});
+
+// --- Print preview ---------------------------------------------------------------------
+
+test('preview starts with the pages as they are, or one paper size for a mix', () => {
+  assert.deepEqual(defaultChoice([letter, letter]), { mode: 'own' });
+  const mixedChoice = defaultChoice([letter, wide]);
+  assert.equal(mixedChoice.mode, 'paper');
+  assert.equal(mixedChoice.paper.id, 'letter');
+});
+
+test('preview places each page on its sheet the way the printer does', () => {
+  const [own] = planPrint([letter], { mode: 'own' });
+  assert.deepEqual(placeOnSheet(letter, own), { x: 0, y: 0, w: 612, h: 792, scale: 1 });
+
+  const plan = planPrint([wide, a5, { w: 1224, h: 792 }], { mode: 'paper', paper: PAPERS[0] });
+  // A landscape letter page turned sideways fills the portrait sheet exactly.
+  assert.deepEqual(placeOnSheet(wide, plan[0]), { x: 0, y: 0, w: 612, h: 792, scale: 1 });
+  // A smaller page is enlarged to fit and centred, never cropped.
+  const small = placeOnSheet(a5, plan[1]);
+  assert.ok(small.w <= 612 + 1e-9 && small.h <= 792 + 1e-9);
+  assert.ok(Math.abs(small.x * 2 + small.w - 612) < 1e-9 && Math.abs(small.y * 2 + small.h - 792) < 1e-9, 'centred');
+  assert.ok(small.x < 1e-9 || small.y < 1e-9, 'touches the sheet on one axis');
+  // A double-width page is turned and shrunk.
+  const big = placeOnSheet({ w: 1224, h: 792 }, plan[2]);
+  assert.ok(Math.abs(big.scale - 792 / 1224) < 1e-9 && big.w <= 612 && Math.abs(big.h - 792) < 1e-9);
+});
+
+test('sheets are described in words for captions and screen readers', () => {
+  const [own] = planPrint([letter], { mode: 'own' });
+  assert.equal(describeSheet(letter, own), '8.5 × 11 in portrait');
+  const plan = planPrint([wide, a5], { mode: 'paper', paper: PAPERS[0] });
+  assert.equal(describeSheet(wide, plan[0]), '8.5 × 11 in portrait, turned sideways');
+  assert.match(describeSheet(a5, plan[1]), /^8\.5 × 11 in portrait, scaled to 13\d%$/);
+  const [landscape] = planPrint([wide], { mode: 'own' });
+  assert.equal(describeSheet(wide, landscape), '11 × 8.5 in landscape');
 });

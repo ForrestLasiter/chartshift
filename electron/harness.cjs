@@ -165,6 +165,39 @@ function runSmoke(win, { output, withPrintWindow, preload }) {
       };
       __editor.undo();
       out.dragUndone = lineIds.every((id) => __editor.getState().pages[0].pieces.some((q) => q.id === id));
+
+      // Print preview: one sheet per page, actually drawn, and it follows the paper choice.
+      const inked = (canvas) => {
+        const { data } = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+        for (let i = 0; i < data.length; i += 4) if (data[i] < 128) return true;
+        return false;
+      };
+      const previewCanvases = () => [...document.querySelectorAll('.sheet-preview canvas')];
+      const aspect = (c) => (c.width > c.height ? 'landscape' : 'portrait');
+      const preview1 = {};
+      press('Print'); await sleep(500);
+      preview1.title = document.querySelector('dialog[open] h2').textContent;
+      preview1.sheets = previewCanvases().length;
+      preview1.drawn = previewCanvases().every(inked);
+      preview1.captions = previewCanvases().map((c) => c.getAttribute('aria-label'));
+      preview1.unnamed = [...document.querySelectorAll('dialog[open] button')].filter((el) => !named(el)).length + [...document.querySelectorAll('dialog[open] input, dialog[open] select')].filter((el) => !labelled(el)).length;
+      preview1.ownSizeChosen = document.querySelector('dialog[open] input[type=radio]').checked;
+      press('Cancel', document.querySelector('dialog[open]')); await sleep(300);
+      // With one landscape page the preview offers one paper size, and switching shows the difference.
+      const both = __editor.getState().pages;
+      __editor.commit([both[0], { ...both[1], w: 792, h: 612 }], { status: 'page 2 landscape' });
+      press('Print'); await sleep(500);
+      const radios = [...document.querySelectorAll('dialog[open] input[type=radio]')];
+      preview1.mixedDefaultsToOnePaper = radios[1].checked;
+      preview1.fitted = previewCanvases().map(aspect);
+      preview1.fittedCaption = previewCanvases()[1].getAttribute('aria-label');
+      radios[0].click(); await sleep(300);
+      preview1.ownSize = previewCanvases().map(aspect);
+      preview1.stillDrawn = previewCanvases().every(inked);
+      press('Cancel', document.querySelector('dialog[open]')); await sleep(300);
+      preview1.closed = !document.querySelector('dialog[open]');
+      __editor.undo();
+      out.printPreview = preview1;
       return out;
     } catch (error) { return { pageError: String(error && error.stack || error) }; } })()`);
     if (report.pageError) throw new Error('in-page checks failed: ' + report.pageError);
@@ -254,11 +287,16 @@ const SCENES = [
     await __h.sleep(400);`],
   ['05b-setlists', `await __h.press('Setlists');`],
   ['06-library-folder', `await __h.press('Folder and sync');`],
-  ['07-print-size', `
+  ['07-print-preview', `
     await __h.closeDialog();
     const pages = __editor.getState().pages;
     __editor.commit([pages[0], { ...pages[1], w: 792, h: 612 }], { status: 'Page 2 turned to landscape (screenshot set-up).' });
-    await __h.press('Print');`],
+    await __h.press('Print');
+    await __h.sleep(400);`],
+  ['07b-print-preview-own-size', `
+    document.querySelector('dialog[open] input[type=radio]').click();
+    await __h.press('Larger preview');
+    await __h.sleep(300);`],
   ['08-save-name', `
     await __h.closeDialog();
     __editor.undo();

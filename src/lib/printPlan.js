@@ -52,3 +52,29 @@ export function nearestPaper(pages) {
   }
   return best;
 }
+
+/** What Print starts with: pages of one size print as they are; a mix is fitted to one paper. */
+export function defaultChoice(pages) {
+  return isMixed(pages) ? { mode: 'paper', paper: nearestPaper(pages) } : { mode: 'own' };
+}
+
+const inches = (points) => Math.round((points / 72) * 100) / 100;
+
+/**
+ * Where a page's picture sits on its sheet, exactly as the printer lays it
+ * out: turned if the plan says so, scaled to fit, and centred. All in points.
+ */
+export function placeOnSheet(page, sheet) {
+  const w = sheet.rotate ? page.h : page.w, h = sheet.rotate ? page.w : page.h;
+  const scale = Math.min(sheet.w / w, sheet.h / h);
+  return { x: (sheet.w - w * scale) / 2, y: (sheet.h - h * scale) / 2, w: w * scale, h: h * scale, scale };
+}
+
+/** Words for a sheet, for captions and screen readers: "8.5 × 11 in portrait, scaled to 77%, turned sideways". */
+export function describeSheet(page, sheet) {
+  const { scale } = placeOnSheet(page, sheet);
+  const parts = [`${inches(sheet.w)} × ${inches(sheet.h)} in ${sheet.w > sheet.h ? 'landscape' : 'portrait'}`];
+  if (Math.abs(scale - 1) > 0.005) parts.push(`scaled to ${Math.round(scale * 100)}%`);
+  if (sheet.rotate) parts.push('turned sideways');
+  return parts.join(', ');
+}

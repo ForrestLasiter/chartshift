@@ -4,7 +4,7 @@ import { PageView } from './PageView.jsx';
 import { Inspector } from './Inspector.jsx';
 import { Icon, Logo } from './icons.jsx';
 import { IconButton, Menu, Segmented } from './ui.jsx';
-import { ChordReviewDialog, ConflictDialog, LibraryDialog, NameDialog, PrintSizeDialog } from './dialogs.jsx';
+import { ChordReviewDialog, ConflictDialog, LibraryDialog, NameDialog, PrintPreviewDialog } from './dialogs.jsx';
 import { importPdf, importImage } from './lib/importer.js';
 import { loadProject, saveProject } from './lib/project.js';
 import { exportPdf, exportSetlistPdf, printImages } from './lib/exporter.js';
@@ -12,7 +12,7 @@ import { exportChordPro, layoutChordPro, parseChordPro } from './lib/chordpro.js
 import { renderPageCanvas } from './lib/render.js';
 import { FONTS } from './lib/text.js';
 import { createRecoveryQueue } from './lib/recoveryQueue.js';
-import { isMixed, planPrint } from './lib/printPlan.js';
+import { planPrint } from './lib/printPlan.js';
 import { LIMITS } from './lib/songSchema.js';
 import * as platform from './lib/platform.js';
 
@@ -203,11 +203,8 @@ export function App() {
     editor.set({ status: outcome?.success ? `${label} sent to printer.` : 'Printing was cancelled.' });
   }), [editor, run]);
 
-  // Pages of different sizes or orientations need a decision first.
-  const requestPrint = useCallback((docs, label) => {
-    if (isMixed(docs.flatMap((d) => d.pages))) setDialog({ type: 'print', docs, label });
-    else printDocs(docs, { mode: 'own' }, label);
-  }, [printDocs]);
+  // Printing starts with a preview, where the paper can be chosen.
+  const requestPrint = useCallback((docs, label) => setDialog({ type: 'print', docs, label }), []);
 
   const print = useCallback(() => {
     const st = editor.getState();
@@ -405,7 +402,7 @@ export function App() {
           <button type="button" className="btn" onClick={() => setDialog('library')} title="Saved songs and setlists (Ctrl+L)"><Icon name="library" />Library</button>
           <button type="button" className="btn primary" onClick={() => saveSong(false)} disabled={!hasDoc} title="Save to the library (Ctrl+S)"><Icon name="save" />Save</button>
           <button type="button" className="btn" onClick={savePdf} disabled={!hasDoc} title="Save as a PDF (Ctrl+E)" aria-label="Save as PDF"><Icon name="pdf" /><span className="optional">PDF</span></button>
-          <button type="button" className="btn" onClick={print} disabled={!hasDoc} title="Print (Ctrl+P)" aria-label="Print"><Icon name="print" /><span className="optional">Print</span></button>
+          <button type="button" className="btn" onClick={print} disabled={!hasDoc} title="Print preview and print (Ctrl+P)" aria-label="Print"><Icon name="print" /><span className="optional">Print</span></button>
           <Menu label="More file actions" items={[
             { label: 'Save under a new name…', icon: 'save', shortcut: 'Ctrl+Shift+S', disabled: !hasDoc, onSelect: () => saveSong(true) },
             { label: 'Export as ChordPro (.cho)', icon: 'music', disabled: !hasDoc, onSelect: saveChordPro },
@@ -530,7 +527,7 @@ export function App() {
           onChoose={(onConflict) => { setDialog(null); writeSong(dialog.conflict.name, { expect: dialog.expect, onConflict }); }} />
       )}
       {dialogType === 'print' && (
-        <PrintSizeDialog pages={dialog.docs.flatMap((d) => d.pages)} onClose={() => setDialog(null)}
+        <PrintPreviewDialog docs={dialog.docs} onClose={() => setDialog(null)}
           onPrint={(choice) => { setDialog(null); printDocs(dialog.docs, choice, dialog.label); }} />
       )}
 

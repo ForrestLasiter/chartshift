@@ -13,6 +13,8 @@ npm start          # production build in Electron
 npm run dist:win   # installer -> release/ChartShift Setup <version>.exe
 ```
 
+To install from a clone rather than just run it: `npm install`, then `npm run dist:win`, then run the installer it writes to `release\` (in PowerShell: `& ".elease\ChartShift Setup <version>.exe"`). Needs Node.js 20 or newer.
+
 Other scripts: `npm test` (unit tests), `npm run shots` (captures screenshots of the main screens at several window sizes and scaling levels into `screenshots/`), `npm run smoke` (drives the real app in Electron against throwaway folders and checks library conflicts, recovery, the content security policy, navigation/IPC lock-down, keyboard and focus behaviour, mixed-size printing and OCR; `node scripts/check-smoke.mjs release/win-unpacked/ChartShift.exe` runs the same checks on a packaged build), `npm run sample` (regenerates `public/sample.pdf`), `npm run web` (editor in a browser, for development).
 
 ## What it does
@@ -54,11 +56,13 @@ Choosing a different library folder (or a cloud folder) copies your songs and se
 
 Nothing in the destination is overwritten or skipped silently, and the previous folder is left as it was.
 
-## Printing pages of different sizes
+## Print preview
 
-When a song or setlist mixes page sizes or orientations, Print asks first:
+Print (Ctrl+P), for a song or a setlist, opens a preview first: every sheet is shown as it will be sent to the printer, with its paper size, and a note when a page is scaled or turned. Section outlines and chord underlines are editing aids and are not printed. Choose the paper there, then **Print…** opens the normal Windows print dialog. Margins or scaling picked in the printer's own dialog can still change the result.
 
-- **Fit every page onto one paper size** (default) - each page is scaled to fit and centred on Letter, A4 or Legal; landscape pages are turned sideways on the sheet. Works with any printer.
+When a song or setlist mixes page sizes or orientations, the preview says so and offers:
+
+- **Fit every page onto one paper size** (the default for a mix) - each page is scaled to fit and centred on Letter, A4 or Legal; landscape pages are turned sideways on the sheet. Works with any printer.
 - **Print each page at its own size** - each sheet keeps its page's size. This needs a printer (or a PDF printer) that can switch paper size within one job.
 
 Saving as PDF always keeps each page's own size.

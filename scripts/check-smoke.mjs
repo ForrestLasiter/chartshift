@@ -45,6 +45,20 @@ const checks = {
     assert.match(status, /to page 2/);
     assert.equal(report.dragUndone, true);
   },
+  'print preview shows every sheet, drawn and described': () => {
+    const p = report.printPreview;
+    assert.equal(p.title, 'Print preview');
+    assert.deepEqual([p.sheets, p.drawn, p.unnamed, p.ownSizeChosen], [2, true, 0, true]);
+    assert.match(p.captions[0], /^Sheet 1 of 2: page 1\. 8\.5 × 11 in portrait$/);
+  },
+  'print preview follows the paper choice': () => {
+    const p = report.printPreview;
+    assert.equal(p.mixedDefaultsToOnePaper, true);
+    assert.deepEqual(p.fitted, ['portrait', 'portrait']);
+    assert.match(p.fittedCaption, /turned sideways/);
+    assert.deepEqual(p.ownSize, ['portrait', 'landscape']);
+    assert.deepEqual([p.stillDrawn, p.closed], [true, true]);
+  },
   'recovery saves, loads and clears': () => assert.deepEqual(report.recovery, { name: 'x', baseVersion: 'abc', cleared: true }),
   'CSP header is served': () => assert.match(report.csp || '', /default-src 'none'/),
   'eval is blocked': () => assert.equal(report.evalBlocked, true),

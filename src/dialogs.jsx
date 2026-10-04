@@ -1,8 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { boundsOf } from './lib/render.js';
+import { boundsOf, renderPageCanvas } from './lib/render.js';
 import { isChord } from './lib/chords.js';
 import { library } from './lib/platform.js';
-import { PAPERS, nearestPaper, pageSizes } from './lib/printPlan.js';
+import { PAPERS, defaultChoice, describeSheet, nearestPaper, pageSizes, placeOnSheet, planPrint } from './lib/printPlan.js';
 import { Icon } from './icons.jsx';
 import { IconButton, TabPanel, Tabs } from './ui.jsx';
 
@@ -10,7 +10,7 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 // A native modal <dialog>: the browser traps Tab inside it, closes it on
 // Escape, and returns focus to whatever opened it.
-export function Modal({ title, onClose, children, footer, wide }) {
+export function Modal({ title, onClose, children, footer, wide, preview }) {
   const ref = useRef(null);
   const titleId = useId();
   useEffect(() => {
@@ -18,7 +18,7 @@ export function Modal({ title, onClose, children, footer, wide }) {
     const opener = document.activeElement;
     if (!dialog.open) dialog.showModal();
     // Start on the first control of the content rather than the Close button.
-    dialog.querySelector('.modal-body :is(input, select, button, [tabindex="0"])')?.focus();
+    dialog.querySelector(':is(.modal-body, .preview-options) :is(input:checked, input:not([type=radio]), select, button, [tabindex="0"])')?.focus();
     return () => {
       dialog.close();
       // By now React has removed the dialog, so the browser can no longer
@@ -27,7 +27,7 @@ export function Modal({ title, onClose, children, footer, wide }) {
     };
   }, []);
   return (
-    <dialog ref={ref} className={`modal${wide ? ' wide' : ''}`} aria-labelledby={titleId}
+    <dialog ref={ref} className={`modal${wide ? ' wide' : ''}${preview ? ' preview' : ''}`} aria-labelledby={titleId}
       onCancel={(e) => { e.preventDefault(); onClose(); }}>
       <header className="modal-head">
         <h2 id={titleId}>{title}</h2>
@@ -397,46 +397,111 @@ export function ConflictDialog({ conflict, onChoose, onClose }) {
 }
 
 const inches = (points) => Math.round((points / 72) * 100) / 100;
+const PREVIEW_WIDTHS = [150, 220, 320, 460];
 
-// Shown before printing pages that differ in size or orientation.
-export function PrintSizeDialog({ pages, onPrint, onClose }) {
-  const sizes = pageSizes(pages);
-  const [mode, setMode] = useState('paper');
-  const [paper, setPaper] = useState(() => nearestPaper(pages).id);
-  const group = useId();
-  const submit = (e) => {
-    e.preventDefault();
-    onPrint(mode === 'paper' ? { mode, paper: PAPERS.find((p) => p.id === paper) } : { mode: 'own' });
-  };
+// One sheet of paper as it will come out of the printer.
+function SheetPreview({ page, atlases, sheet, width, caption }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const canvas = ref.current;
+    const dpr = window.devicePixelRatio || 1;
+    const perPoint = (width * dpr) / sheet.w;
+    canvas.width = Math.round(sheet.w * perPoint);
+    canvas.height = Math.round(sheet.h * perPoint);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const spot = placeOnSheet(page, sheet);
+    // The same picture the printer gets, at preview resolution.
+    const picture = renderPageCanvas(page, atlases, 72 * spot.scale * perPoint);
+    ctx.imageSmoothingQuality = 'high';
+    if (sheet.rotate) {
+      ctx.translate((spot.x + spot.w) * perPoint, spot.y * perPoint);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(picture, 0, 0, spot.h * perPoint, spot.w * perPoint);
+    } else {
+      ctx.drawImage(picture, spot.x * perPoint, spot.y * perPoint, spot.w * perPoint, spot.h * perPoint);
+    }
+  }, [page, atlases, sheet.w, sheet.h, sheet.rotate, width]);
   return (
-    <Modal title="These pages are different sizes" onClose={onClose}>
+    <figure className="sheet-preview" style={{ width }}>
+      <canvas ref={ref} role="img" aria-label={caption} style={{ width, height: (width * sheet.h) / sheet.w }} />
+      <figcaption>{caption}</figcaption>
+    </figure>
+  );
+}
+
+/**
+ * Print preview: shows every sheet as it will print and lets the paper be
+ * chosen before the system print dialog opens. docs = [{ name?, pages, atlases }].
+ */
+export function PrintPreviewDialog({ docs, onPrint, onClose }) {
+  const items = useMemo(() => docs.flatMap((doc) => doc.pages.map((page, i) => ({ page, atlases: doc.atlases, name: doc.name, number: i + 1 }))), [docs]);
+  const pages = useMemo(() => items.map((item) => item.page), [items]);
+  const sizes = pageSizes(pages);
+  const mixed = sizes.length > 1;
+  const start = useMemo(() => defaultChoice(pages), [pages]);
+  const [mode, setMode] = useState(start.mode);
+  const [paper, setPaper] = useState(() => nearestPaper(pages).id);
+  const [zoom, setZoom] = useState(1);
+  const group = useId();
+  const choice = mode === 'paper' ? { mode, paper: PAPERS.find((p) => p.id === paper) } : { mode: 'own' };
+  const plan = planPrint(pages, choice);
+  const submit = (e) => { e.preventDefault(); onPrint(choice); };
+  return (
+    <Modal title="Print preview" onClose={onClose} preview>
       <form onSubmit={submit}>
-        <div className="modal-body">
-          <ul className="sizes">
-            {sizes.map((s) => (
-              <li key={`${s.w}x${s.h}`}>{plural(s.count, 'page')}: {inches(s.w)} × {inches(s.h)} in ({s.w > s.h ? 'landscape' : 'portrait'})</li>
-            ))}
-          </ul>
-          <fieldset>
-            <legend>How should they print?</legend>
-            <label className="check">
-              <input type="radio" name={group} checked={mode === 'paper'} onChange={() => setMode('paper')} />
-              <span><strong>Fit every page onto one paper size</strong><br /><span className="muted">Works with any printer. Each page is scaled to fit and centred; landscape pages are turned sideways on the sheet.</span></span>
-            </label>
-            <label className="field indent">Paper
-              <select value={paper} onChange={(e) => setPaper(e.target.value)} disabled={mode !== 'paper'}>
-                {PAPERS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-              </select>
-            </label>
-            <label className="check">
-              <input type="radio" name={group} checked={mode === 'own'} onChange={() => setMode('own')} />
-              <span><strong>Print each page at its own size</strong><br /><span className="muted">Needs a printer, or a PDF printer, that can switch paper size within one job.</span></span>
-            </label>
-          </fieldset>
+        <div className="preview-layout">
+          <div className="preview-options">
+            <p className="fact"><strong>{plural(plan.length, 'sheet')}</strong></p>
+            {mixed && (
+              <div className="note">
+                <Icon name="alert" />
+                <div>
+                  <p>These pages are different sizes:</p>
+                  <ul className="sizes">
+                    {sizes.map((s) => (
+                      <li key={`${s.w}x${s.h}`}>{plural(s.count, 'page')}: {inches(s.w)} × {inches(s.h)} in ({s.w > s.h ? 'landscape' : 'portrait'})</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+            <fieldset>
+              <legend>Paper</legend>
+              <label className="check">
+                <input type="radio" name={group} checked={mode === 'own'} onChange={() => setMode('own')} />
+                <span><strong>{mixed ? 'Each page at its own size' : `Same as the pages (${inches(sizes[0].w)} × ${inches(sizes[0].h)} in)`}</strong>
+                  {mixed && <><br /><span className="muted">Needs a printer, or a PDF printer, that can switch paper size within one job.</span></>}</span>
+              </label>
+              <label className="check">
+                <input type="radio" name={group} checked={mode === 'paper'} onChange={() => setMode('paper')} />
+                <span><strong>Fit every page onto one paper size</strong><br /><span className="muted">Each page is scaled to fit and centred; landscape pages are turned sideways on the sheet.</span></span>
+              </label>
+              <label className="field indent">Paper size
+                <select value={paper} onChange={(e) => setPaper(e.target.value)} disabled={mode !== 'paper'}>
+                  {PAPERS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                </select>
+              </label>
+            </fieldset>
+            <p className="muted">The preview shows what is sent to the printer. Section outlines and chord underlines are editing aids and do not print. Margins and scaling chosen in the printer’s own dialog can still change the result.</p>
+          </div>
+          <div className="preview-pane">
+            <div className="preview-tools">
+              <IconButton icon="zoomOut" label="Smaller preview" disabled={zoom === 0} onClick={() => setZoom(zoom - 1)} />
+              <IconButton icon="zoomIn" label="Larger preview" disabled={zoom === PREVIEW_WIDTHS.length - 1} onClick={() => setZoom(zoom + 1)} />
+            </div>
+            <div className="preview-sheets" role="group" aria-label="Sheets as they will print" tabIndex={0}>
+              {items.map((item, i) => (
+                <SheetPreview key={`${item.page.id}-${i}`} page={item.page} atlases={item.atlases} sheet={plan[i]} width={PREVIEW_WIDTHS[zoom]}
+                  caption={`Sheet ${i + 1} of ${items.length}: ${item.name ? `${item.name}, ` : ''}page ${item.number}. ${describeSheet(item.page, plan[i])}`} />
+              ))}
+            </div>
+          </div>
         </div>
         <footer className="modal-foot">
           <button type="button" className="btn outline" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn primary"><Icon name="print" />Print</button>
+          <button type="submit" className="btn primary"><Icon name="print" />Print…</button>
         </footer>
       </form>
     </Modal>

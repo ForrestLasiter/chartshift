@@ -180,7 +180,7 @@ function PageTools({ editor, onPdf, onPrint, onChordPro }) {
       <div className="group">
         <h3>Export</h3>
         <button type="button" className="btn outline block" onClick={onPdf}><Icon name="pdf" />Save as PDF</button>
-        <button type="button" className="btn outline block" onClick={onPrint}><Icon name="print" />Print</button>
+        <button type="button" className="btn outline block" onClick={onPrint}><Icon name="print" />Print preview…</button>
         <button type="button" className="btn outline block" onClick={onChordPro}>Export as ChordPro (.cho)</button>
       </div>
     </>
