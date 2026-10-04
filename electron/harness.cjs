@@ -10,6 +10,17 @@ const fs = require('fs/promises');
 const DOT_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Capturing the window occasionally fails for a moment (for example while the
+// window is covered); a short retry is enough.
+async function capture(win) {
+  for (let attempt = 0; ; attempt++) {
+    try { return (await win.webContents.capturePage()).toPNG(); } catch (error) {
+      if (attempt >= 4) throw error;
+      await sleep(400);
+    }
+  }
+}
+
 function whenSampleOpens(win, run) {
   const fail = setTimeout(() => { console.error('HARNESS FAIL: sample did not open'); app.exit(1); }, 60000);
   let started = false;
@@ -30,7 +41,7 @@ function whenSampleOpens(win, run) {
 
 function runSmoke(win, { output, withPrintWindow, preload }) {
   whenSampleOpens(win, async () => {
-    await fs.writeFile(output, (await win.webContents.capturePage()).toPNG());
+    await fs.writeFile(output, await capture(win));
     const page = (code) => win.webContents.executeJavaScript(code);
     const report = await page(`(async () => { try {
       const lib = window.chartshift.library, rec = window.chartshift.recovery;
@@ -115,6 +126,45 @@ function runSmoke(win, { output, withPrintWindow, preload }) {
       dialog.dispatchEvent(new Event('cancel', { cancelable: true })); await sleep(300);
       a11y.dialogClosesAndRestoresFocus = !document.querySelector('dialog[open]') && document.activeElement === opener;
       out.a11y = a11y;
+
+      // Sections from the sample's "[Verse 1]" style headings.
+      const press = (name, scope = document) => [...scope.querySelectorAll('button, [role=tab]')].find((el) => (el.getAttribute('aria-label') || el.textContent.trim()) === name).click();
+      press('Sections'); await sleep(150);
+      press('Find sections from headings'); await sleep(150);
+      out.sections = [__editor.sectionList(0).map((s) => s.label), __editor.sectionList(1).map((s) => s.label)];
+
+      // Two pages fit next to each other.
+      press('Two pages side by side'); await sleep(400);
+      const sheets = () => [...document.querySelectorAll('.sheet canvas')];
+      const [left, right] = sheets().map((c) => c.getBoundingClientRect());
+      out.sideBySide = Math.abs(left.top - right.top) < 2 && right.left > left.right && right.right <= document.getElementById('workspace').getBoundingClientRect().right;
+
+      // Dragging a line from page 1 and dropping it on page 2 moves it there.
+      __editor.set({ level: 'line', tool: 'select' });
+      __editor.select([]);
+      const zoom = __editor.getState().zoom;
+      const grab = __editor.getState().pages[0].pieces.find((q) => q.y > 170 && q.y < 182);
+      const lineIds = __editor.getState().pages[0].pieces.filter((q) => q.line === grab.line).map((q) => q.id);
+      const fire = (type, x, y) => sheets()[0].dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, pointerId: 1 }));
+      const from = sheets()[0].getBoundingClientRect(), to = sheets()[1].getBoundingClientRect();
+      const startX = from.left + (grab.x + grab.w / 2) * zoom, startY = from.top + (grab.y + grab.h / 2) * zoom;
+      const dropX = to.left + 300 * zoom, dropY = to.top + 400 * zoom;
+      fire('pointerdown', startX, startY);
+      fire('pointermove', startX + 10, startY + 10);
+      fire('pointermove', dropX, dropY);
+      const preview = __editor.transient.cross;
+      fire('pointerup', dropX, dropY);
+      const after = __editor.getState();
+      const landed = after.pages[1].pieces.find((q) => q.id === grab.id);
+      out.dragAcrossPages = {
+        previewed: !!preview && preview.from === 0 && preview.to === 1,
+        leftPageOne: lineIds.every((id) => !after.pages[0].pieces.some((q) => q.id === id)),
+        arrivedOnPageTwo: lineIds.every((id) => after.pages[1].pieces.some((q) => q.id === id)),
+        underPointer: !!landed && Math.abs(landed.x + landed.w / 2 - 300) < 1 && Math.abs(landed.y + landed.h / 2 - 400) < 1,
+        status: after.status,
+      };
+      __editor.undo();
+      out.dragUndone = lineIds.every((id) => __editor.getState().pages[0].pieces.some((q) => q.id === id));
       return out;
     } catch (error) { return { pageError: String(error && error.stack || error) }; } })()`);
     if (report.pageError) throw new Error('in-page checks failed: ' + report.pageError);
@@ -222,6 +272,23 @@ const SCENES = [
     __editor.selectAll(); __editor.moveSelection(0, 2); __editor.select([]);
     await __h.press('Save');
     await __h.idle();`],
+  ['10-two-pages', `
+    await __h.closeDialog();
+    __editor.select([]);
+    await __h.press('Two pages side by side');
+    document.querySelector('.workspace').scrollTop = 0;`],
+  ['11-drag-to-other-page', `
+    __editor.set({ level: 'section', tool: 'select' });
+    const z = __editor.getState().zoom;
+    const g = __editor.getState().pages[0].pieces.find((q) => q.y > 280 && q.y < 300);
+    const sheets = [...document.querySelectorAll('.sheet canvas')];
+    const a = sheets[0].getBoundingClientRect(), b = sheets[1].getBoundingClientRect();
+    const fire = (type, x, y) => sheets[0].dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, pointerId: 1 }));
+    const sx = a.left + (g.x + g.w / 2) * z, sy = a.top + (g.y + g.h / 2) * z;
+    fire('pointerdown', sx, sy); fire('pointermove', sx + 8, sy + 8); fire('pointermove', b.left + 150 * z, b.top + 420 * z);
+    window.__drop = () => fire('pointerup', b.left + 150 * z, b.top + 420 * z);
+    await __h.sleep(200);`],
+  ['12-after-drop', `window.__drop(); await __h.sleep(200);`],
 ];
 
 function runShots(win, { folder }) {
@@ -240,7 +307,7 @@ function runShots(win, { folder }) {
       await fs.mkdir(dir, { recursive: true });
       win.setContentSize(width, height);
       win.webContents.setZoomFactor(zoom);
-      const shoot = async (name) => { await sleep(350); await fs.writeFile(path.join(dir, `${name}.png`), (await win.webContents.capturePage()).toPNG()); };
+      const shoot = async (name) => { await sleep(350); await fs.writeFile(path.join(dir, `${name}.png`), await capture(win)); };
       await win.loadURL('app://chartshift/index.html?debug');
       await sleep(900);
       await shoot('00-welcome');

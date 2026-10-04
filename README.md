@@ -17,9 +17,9 @@ Other scripts: `npm test` (unit tests), `npm run shots` (captures screenshots of
 
 ## What it does
 
-- **Rearrange**: grab by section, block, line, word or letter; drag, nudge, resize, copy, erase; add text boxes; add, reorder and delete pages.
+- **Rearrange**: grab by section, block, line, word or letter; drag, nudge, resize, copy, erase; add text boxes; add, reorder and delete pages. Drag a selection onto another page to move it there (the view scrolls if you drag to its edge). Pages sit next to each other when the window is wide enough; the two-page button zooms to fit two across.
 - **Scan cleanup** (automatic on scans and photos): straightens tilted pages, whitens grey or unevenly lit paper, drops specks. "Remove stray specks" catches leftovers.
-- **Sections**: name a group of lines (Verse, Chorus…), then move it up/down, repeat it, or delete it and close the gap. "Find sections from headings" does this from the text.
+- **Sections**: name a group of lines (Verse, Chorus…), then move it up/down, repeat it, or delete it and close the gap. "Find sections from headings" does this from the text: it recognises bracketed headings as used by Ultimate Guitar (`[Verse 1]`, `[Chorus]`, `[Guitar Solo]`, `[Chorus] x2`) as well as plain ones (`Verse 1`, `Chorus x2`, `Bridge:`). A scan needs "Read text from scan" first.
 - **Chords**: transpose by half steps or to a key, capo shapes, Nashville numbers. Digital PDFs are read directly; scans use built-in OCR followed by a "Check the chords" review.
 - **Layout**: fit a song on one page, or large print.
 - **ChordPro**: open `.cho`/`.chopro` files and export to `.cho`.

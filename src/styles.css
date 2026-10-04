@@ -197,7 +197,8 @@ kbd { font: inherit; font-size: 11.5px; color: var(--text-2); }
 .workspace {
   flex: 1; min-width: 0; overflow: auto;
   padding: var(--s4) var(--s6) 48px;
-  display: flex; flex-direction: column; align-items: safe center; gap: var(--s5);
+  /* Pages sit next to each other whenever the window is wide enough for it. */
+  display: flex; flex-flow: row wrap; justify-content: safe center; align-content: flex-start; align-items: flex-start; gap: var(--s5);
 }
 .workspace:focus-visible { outline-offset: -2px; }
 

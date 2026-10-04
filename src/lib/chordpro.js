@@ -3,12 +3,39 @@
 import { isChord, isChordLine } from './chords.js';
 import { LINE_HEIGHT, measureText } from './text.js';
 
-const SECTION_RE = /^(verse|chorus|pre[- ]?chorus|bridge|intro|outro|tag|interlude|instrumental|ending|refrain|turnaround|vamp)\b/i;
+// Words that name a part of a song.
+const PART = '(?:verse|chorus|pre[- ]?chorus|post[- ]?chorus|bridge|intro|outro|tag|interlude|instrumental|ending|refrain|turnaround|vamp|solo|hook|break|breakdown|coda|riff|lead|link|middle ?8)';
+// A bare heading: "Verse 1", "Chorus x2", "Intro riff", "Verse 2:", "Bridge (softly)".
+const BARE_HEADING = new RegExp(`^${PART}(?:\\s+${PART})?(?:\\s*\\d+[a-z]?)?\\s*(?:x\\s*\\d+|\\(.*\\)|[:\\-].*)?$`, 'i');
+const STARTS_WITH_PART = new RegExp(`^${PART}\\b`, 'i');
 const SANS = 'Arial, Helvetica, sans-serif';
 const PAGE = { w: 612, h: 792, margin: 54 };
 const CHORD_COLOR = '#1e3a8a';
 
-export const isSectionHeader = (text) => SECTION_RE.test(text.trim());
+/**
+ * If a line of text is a section heading, returns its name; otherwise null.
+ * Recognises bare headings ("Verse 1", "Chorus x2") and bracketed ones as
+ * used by Ultimate Guitar and similar sites: "[Verse 1]", "[Guitar Solo]",
+ * "[Chorus] x2", "(Bridge)". Anything in square brackets counts unless it is
+ * a chord; round brackets must contain a part name.
+ */
+export function sectionLabel(text) {
+  let raw = text.trim().replace(/\s+/g, ' ');
+  if (!raw || raw.length > 48) return null;
+  // OCR often reads "[" as I, l, | or 1 when the line still ends with "]".
+  if (/\]\s*(x\s*\d+)?[:.]?$/i.test(raw) && /^[Il|1](?=[A-Z])/.test(raw)) raw = `[${raw.slice(1)}`;
+  const bracketed = raw.match(/^([\[({])\s*([^\])}]{2,40}?)\s*[\])}]\s*(?:\(?x\s*\d+\)?)?[:.]?$/i);
+  if (bracketed) {
+    const inner = bracketed[2].trim();
+    if (STARTS_WITH_PART.test(inner)) return inner;
+    if (bracketed[1] === '[' && !isChordLine(inner.split(' '))) return inner;
+    return null;
+  }
+  const bare = raw.replace(/^[\s*#:.\-–—|]+/, '').replace(/[\s*#.\-–—|]+$/, '');
+  return BARE_HEADING.test(bare) ? bare.replace(/:$/, '') : null;
+}
+
+export const isSectionHeader = (text) => sectionLabel(text) !== null;
 
 export function parseChordPro(source) {
   const song = { title: '', subtitle: '', key: '', capo: '', lines: [] };
@@ -201,7 +228,8 @@ export function exportChordPro(pages, title) {
         previous = row;
       } else {
         const text = texts.join(' ');
-        out.push(isSectionHeader(text) ? `{comment: ${text}}` : text);
+        const heading = sectionLabel(text);
+        out.push(heading ? `{comment: ${heading}}` : text);
         previous = row;
       }
     }

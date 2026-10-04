@@ -189,6 +189,33 @@ export function createEditor() {
     commit(mapSelected((p) => ({ ...p, x: p.x + dx, y: p.y + dy })), { status: `Moved ${countLabel(state.selection.size)}.` });
   };
 
+  // Carries the selected pieces of page `from` onto page `to`. (dx, dy) is the
+  // move in the target page's coordinates; any other selected pieces just
+  // move by (localDx, localDy) on their own pages. Sections travel with them.
+  ed.moveSelectionToPage = (from, to, dx, dy, localDx = 0, localDy = 0) => {
+    const moving = selectedOn(state.pages[from]);
+    if (!moving.length || from === to || !state.pages[to]) return;
+    const ids = new Set(moving.map((p) => p.id));
+    const moved = moving.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy }));
+    const carried = new Set(moved.map((p) => p.section).filter((s) => s != null));
+    const pages = state.pages.map((page, i) => {
+      if (i === from) {
+        const pieces = page.pieces.filter((p) => !ids.has(p.id));
+        const used = new Set(pieces.map((p) => p.section));
+        return { ...page, pieces, sections: (page.sections || []).filter((s) => used.has(s.id)) };
+      }
+      if (i === to) {
+        const have = new Set((page.sections || []).map((s) => s.id));
+        const incoming = (state.pages[from].sections || []).filter((s) => carried.has(s.id) && !have.has(s.id));
+        const stay = page.pieces.map((p) => (state.selection.has(p.id) ? { ...p, x: p.x + localDx, y: p.y + localDy } : p));
+        return { ...page, pieces: [...stay, ...moved], sections: [...(page.sections || []), ...incoming] };
+      }
+      if (!page.pieces.some((p) => state.selection.has(p.id))) return page;
+      return { ...page, pieces: page.pieces.map((p) => (state.selection.has(p.id) ? { ...p, x: p.x + localDx, y: p.y + localDy } : p)) };
+    });
+    commit(pages, { activePage: to, status: `Moved ${countLabel(moving.length)} to page ${to + 1}.` });
+  };
+
   ed.scaleSelection = (pageIndex, f, ox, oy) => {
     if (f === 1) return;
     const pages = mapSelected((p, i) => {

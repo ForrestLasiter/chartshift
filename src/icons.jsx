@@ -30,6 +30,7 @@ const PATHS = {
   sections: 'M4 5h16v5H4z M4 14h16v5H4z',
   page: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z M14 3v5h5',
   panel: 'M4 4h16v16H4z M15 4v16',
+  twoPages: 'M3 5h8v14H3z M13 5h8v14h-8z',
   alert: 'M12 4l9 16H3z M12 10v4 M12 17h.01',
   check: 'M5 12l5 5 9-10',
   edit: 'M4 20h4L19 9l-4-4L4 16z M13.5 6.5l4 4',

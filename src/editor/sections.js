@@ -2,7 +2,7 @@
 // selected, reordered, duplicated or removed as a unit. A piece belongs to a
 // section through `piece.section`; `page.sections` holds the labels.
 import { boundsOf } from '../lib/render.js';
-import { isSectionHeader } from '../lib/chordpro.js';
+import { sectionLabel } from '../lib/chordpro.js';
 
 const DEFAULT_GAP = 14;
 
@@ -134,8 +134,8 @@ export function installSections(ed) {
       const headers = [];
       for (const row of rows.values()) {
         const words = [...row.words.values()].sort((a, b) => a[0] - b[0]).map((w) => w[1]);
-        const text = words.join(' ');
-        if (words.length <= 4 && text.length <= 30 && isSectionHeader(text)) headers.push({ top: row.top, label: text.replace(/[:.]$/, '') });
+        const label = words.length <= 6 ? sectionLabel(words.join(' ')) : null;
+        if (label) headers.push({ top: row.top, label });
       }
       if (!headers.length) return page;
       headers.sort((a, b) => a.top - b.top);
@@ -150,6 +150,11 @@ export function installSections(ed) {
       return prune({ ...page, pieces, sections: headers.map(({ id, label }) => ({ id, label })) });
     });
     if (made) ed.commit(next, { status: `Made ${made} section${made === 1 ? '' : 's'} from the headings.` });
-    else ed.set({ status: 'No headings like “Verse” or “Chorus” were found in the recognised text. Select lines and use “Make section” instead.' });
+    else {
+      const readable = pages().some((page) => page.pieces.some((p) => p.kind === 'text' || p.t));
+      ed.set({ status: readable
+        ? 'No headings such as “[Verse 1]” or “Chorus” were found. Select the lines and use “Make section from selection” instead.'
+        : 'This song has no readable text yet, so headings cannot be found. On the Chords tab, use “Read text from scan” first.' });
+    }
   };
 }

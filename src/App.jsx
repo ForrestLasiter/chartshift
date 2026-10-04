@@ -60,6 +60,13 @@ export function App() {
     return Math.max(0.5, Math.min(2, Math.round((width / page.w) * 100) / 100));
   }, []);
 
+  // Zoom at which two pages fit next to each other.
+  const fitTwoZoom = useCallback((pageList) => {
+    const width = (workspace.current?.clientWidth || 1000) - 84 - 24;
+    const widest = Math.max(...pageList.map((p) => p.w));
+    return Math.max(0.3, Math.min(2, Math.floor((width / (2 * widest)) * 100) / 100));
+  }, []);
+
   const run = useCallback(async (message, task) => {
     editor.set({ busy: message });
     try {
@@ -429,7 +436,9 @@ export function App() {
             <IconButton icon="zoomOut" label="Zoom out" hint="Zoom out (Ctrl+-)" onClick={() => stepZoom(-1)} />
             <span className="zoom-value" aria-label={`Zoom ${Math.round(zoom * 100)} percent`}>{Math.round(zoom * 100)}%</span>
             <IconButton icon="zoomIn" label="Zoom in" hint="Zoom in (Ctrl++)" onClick={() => stepZoom(1)} />
-            <IconButton icon="fit" label="Fit" hint="Fit the page to the window width" onClick={() => editor.set({ zoom: fitZoom(pages[0]) })} />
+            <IconButton icon="fit" label="Fit" hint="Fit one page to the window width" onClick={() => editor.set({ zoom: fitZoom(pages[0]) })} />
+            <IconButton icon="twoPages" label="Two pages side by side" hint="Zoom so two pages fit next to each other"
+              disabled={pages.length < 2} onClick={() => editor.set({ zoom: fitTwoZoom(pages) })} />
           </div>
           <span className="divider" aria-hidden="true" />
           <IconButton icon="panel" label="Song tools panel" hint={inspectorOpen ? 'Hide the song tools panel' : 'Show the song tools panel'}
@@ -497,7 +506,7 @@ export function App() {
 
       <footer className="statusbar">
         <span role="status" aria-live="polite">{busy && <span className="spinner" aria-hidden="true" />}{busy || state.status}</span>
-        {hasDoc && <span className="hint">Shift-drag: straight line · Alt-drag: no snapping · Arrows: nudge · . and , step through pieces</span>}
+        {hasDoc && <span className="hint">Drag onto another page to move pieces there · Shift-drag: straight line · Alt-drag: no snapping · Arrows: nudge</span>}
       </footer>
 
       {dialogType === 'library' && (

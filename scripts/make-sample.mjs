@@ -16,15 +16,15 @@ page.drawText('Morning Light (sample)', { x: 72, y: 720, size: 22, font: bold })
 page.drawText('Key of G  -  for trying out ChartShift', { x: 72, y: 698, size: 11, font: sans });
 
 const sections = [
-  ['Verse 1', [
+  ['[Verse 1]', [
     ['G              C            G', 'Morning light is on the hills again'],
     ['Em             C            D', 'Every shadow starts to fade away'],
   ]],
-  ['Chorus', [
+  ['[Chorus]', [
     ['C          G          D        Em', 'Lift it up, lift it up, let it ring'],
     ['C          G          D        G', 'All together now we sing'],
   ]],
-  ['Verse 2', [
+  ['[Verse 2]', [
     ['G              C            G', 'Evening comes and still the song remains'],
     ['Em             C            D', 'Carry it along the road back home'],
   ]],
@@ -43,7 +43,7 @@ for (const [title, lines] of sections) {
 }
 
 const tab = pdf.addPage([612, 792]);
-tab.drawText('Intro riff', { x: 72, y: 720, size: 14, font: bold });
+tab.drawText('[Intro]', { x: 72, y: 720, size: 14, font: bold });
 const top = 680, gap = 12, left = 72, right = 540;
 for (let s = 0; s < 6; s++) {
   tab.drawLine({ start: { x: left, y: top - s * gap }, end: { x: right, y: top - s * gap }, thickness: 0.8 });

@@ -37,6 +37,14 @@ const checks = {
   'menu works from the keyboard': () => assert.deepEqual([report.a11y.menuFocusesFirstItem, report.a11y.menuArrowMoves, report.a11y.menuEscapeCloses], [true, true, true]),
   'inspector tabs work from the keyboard': () => assert.equal(report.a11y.tabsArrow, true),
   'dialogs are modal, labelled, and restore focus': () => assert.deepEqual([report.a11y.dialogModal, report.a11y.dialogClosesAndRestoresFocus], [true, true]),
+  'sections are found from [bracketed] headings': () => assert.deepEqual(report.sections, [['Verse 1', 'Chorus', 'Verse 2'], ['Intro']]),
+  'two pages fit side by side': () => assert.equal(report.sideBySide, true),
+  'dragging onto another page moves the pieces there': () => {
+    const { status, ...flags } = report.dragAcrossPages;
+    assert.deepEqual(flags, { previewed: true, leftPageOne: true, arrivedOnPageTwo: true, underPointer: true });
+    assert.match(status, /to page 2/);
+    assert.equal(report.dragUndone, true);
+  },
   'recovery saves, loads and clears': () => assert.deepEqual(report.recovery, { name: 'x', baseVersion: 'abc', cleared: true }),
   'CSP header is served': () => assert.match(report.csp || '', /default-src 'none'/),
   'eval is blocked': () => assert.equal(report.evalBlocked, true),

@@ -65,7 +65,7 @@ function drawPiece(ctx, p, atlases) {
  * `view.px` is the size of one screen pixel in points.
  */
 export function drawPage(ctx, page, atlases, view) {
-  const { scale, selection, transient, hiddenId, pageIndex, decorate, showChords, px = 1 } = view;
+  const { scale, selection, transient, hiddenId, pageIndex, decorate, showChords, incoming, px = 1 } = view;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -89,6 +89,14 @@ export function drawPage(ctx, page, atlases, view) {
       inSection.get(piece.section).push(r);
     }
     if (showChords && piece.chord) chordRects.push(r);
+  }
+  // Pieces being dragged in from another page are shown where they would land.
+  if (incoming) {
+    for (const piece of incoming.pieces) {
+      const r = { ...piece, x: piece.x + incoming.dx, y: piece.y + incoming.dy };
+      drawPiece(ctx, r, atlases);
+      live.push(r);
+    }
   }
   if (!decorate) return;
 

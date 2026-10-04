@@ -6,6 +6,18 @@ import { IconButton } from './ui.jsx';
 
 const DRAG_START_PX = 3;
 const SNAP_PX = 5;
+const SCROLL_EDGE_PX = 40;
+const SCROLL_SPEED_PX = 16;
+
+// Which page (if any) is under a point on the screen.
+function pageAt(clientX, clientY) {
+  const canvases = document.querySelectorAll('.sheet canvas');
+  for (let i = 0; i < canvases.length; i++) {
+    const rect = canvases[i].getBoundingClientRect();
+    if (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) return { index: i, rect };
+  }
+  return null;
+}
 
 function nearest(values, target) {
   let best = null, bestDiff = Infinity;
@@ -61,8 +73,14 @@ export function PageView({ editor, state, page, index, pageCount }) {
     const dpr = window.devicePixelRatio || 1;
     const w = Math.round(page.w * zoom * dpr), h = Math.round(page.h * zoom * dpr);
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    // A drag that has crossed onto this page: preview the pieces arriving.
+    const cross = editor.transient.cross;
+    const st = editor.getState();
+    const incoming = cross && cross.to === index && st.pages[cross.from]
+      ? { pieces: st.pages[cross.from].pieces.filter((p) => st.selection.has(p.id)), dx: editor.transient.move.dx + cross.ox, dy: editor.transient.move.dy + cross.oy }
+      : null;
     drawPage(canvas.getContext('2d'), page, editor.atlases, {
-      scale: w / page.w, selection, transient: editor.transient, hiddenId, pageIndex: index, decorate: true, showChords, px: 1 / zoom,
+      scale: w / page.w, selection, transient: editor.transient, hiddenId, pageIndex: index, decorate: true, showChords, incoming, px: 1 / zoom,
     });
   }, [editor, page, zoom, selection, hiddenId, index, showChords]);
 
@@ -154,6 +172,61 @@ export function PageView({ editor, state, page, index, pageCount }) {
     }
   };
 
+  // Updates an in-progress move from the last known pointer position. Called on
+  // pointer movement and again while the view scrolls under a still pointer.
+  const applyMove = (d) => {
+    const { clientX, clientY, shiftKey, altKey } = d.last;
+    const rect = canvasRef.current.getBoundingClientRect();
+    let dx = (clientX - rect.left) / zoom - d.start.x, dy = (clientY - rect.top) / zoom - d.start.y;
+    // Over another page: the pieces will land there, at the pointer.
+    const over = pageAt(clientX, clientY);
+    if (over && over.index !== index) {
+      editor.transient = { move: { dx, dy }, cross: { from: index, to: over.index, ox: (rect.left - over.rect.left) / zoom, oy: (rect.top - over.rect.top) / zoom } };
+      editor.requestDraw();
+      return;
+    }
+    let lockX = false, lockY = false;
+    if (shiftKey) {
+      if (Math.abs(dx) > Math.abs(dy)) { dy = 0; lockY = true; } else { dx = 0; lockX = true; }
+    }
+    let guides = null;
+    if (!altKey && d.snap) {
+      const { b, xs, tops, bottoms } = d.snap;
+      const tol = SNAP_PX / zoom;
+      guides = { page: index };
+      if (!lockX) {
+        const left = nearest(xs, b.x + dx);
+        if (left.diff < tol) { dx = left.value - b.x; guides.x = left.value; }
+      }
+      if (!lockY) {
+        const bottom = nearest(bottoms, b.y + b.h + dy);
+        const top = nearest(tops, b.y + dy);
+        if (bottom.diff < tol && bottom.diff <= top.diff) { dy = bottom.value - b.y - b.h; guides.y = bottom.value; }
+        else if (top.diff < tol) { dy = top.value - b.y; guides.y = top.value; }
+      }
+    }
+    editor.transient = { move: { dx, dy }, guides };
+    editor.requestDraw();
+  };
+
+  // While dragging near an edge of the work area, scroll so that pages which
+  // are out of view (below, or beside) can be reached.
+  const autoScroll = () => {
+    const d = drag.current;
+    if (!d || d.mode !== 'move' || !d.last) return;
+    const area = document.getElementById('workspace');
+    const r = area.getBoundingClientRect();
+    const { clientX, clientY } = d.last;
+    const sx = clientX < r.left + SCROLL_EDGE_PX ? -SCROLL_SPEED_PX : clientX > r.right - SCROLL_EDGE_PX ? SCROLL_SPEED_PX : 0;
+    const sy = clientY < r.top + SCROLL_EDGE_PX ? -SCROLL_SPEED_PX : clientY > r.bottom - SCROLL_EDGE_PX ? SCROLL_SPEED_PX : 0;
+    if (sx || sy) {
+      const before = [area.scrollLeft, area.scrollTop];
+      area.scrollBy(sx, sy);
+      if (before[0] !== area.scrollLeft || before[1] !== area.scrollTop) applyMove(d);
+    }
+    d.raf = requestAnimationFrame(autoScroll);
+  };
+
   const onPointerMove = (e) => {
     const d = drag.current;
     const pt = toPage(e);
@@ -168,34 +241,16 @@ export function PageView({ editor, state, page, index, pageCount }) {
     }
     if (d.mode === 'erase') return eraseAt(pt);
     if (d.mode === 'move') {
+      d.last = { clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey, altKey: e.altKey };
       if (!d.moved) {
         if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < DRAG_START_PX) return;
         d.moved = true;
         d.snap = buildSnap();
+        d.raf = requestAnimationFrame(autoScroll);
       }
-      let dx = pt.x - d.start.x, dy = pt.y - d.start.y;
-      let lockX = false, lockY = false;
-      if (e.shiftKey) {
-        if (Math.abs(dx) > Math.abs(dy)) { dy = 0; lockY = true; } else { dx = 0; lockX = true; }
-      }
-      let guides = null;
-      if (!e.altKey && d.snap) {
-        const { b, xs, tops, bottoms } = d.snap;
-        const tol = SNAP_PX / zoom;
-        guides = { page: index };
-        if (!lockX) {
-          const left = nearest(xs, b.x + dx);
-          if (left.diff < tol) { dx = left.value - b.x; guides.x = left.value; }
-        }
-        if (!lockY) {
-          const bottom = nearest(bottoms, b.y + b.h + dy);
-          const top = nearest(tops, b.y + dy);
-          if (bottom.diff < tol && bottom.diff <= top.diff) { dy = bottom.value - b.y - b.h; guides.y = bottom.value; }
-          else if (top.diff < tol) { dy = top.value - b.y; guides.y = top.value; }
-        }
-      }
-      editor.transient = { move: { dx, dy }, guides };
-    } else if (d.mode === 'scale') {
+      return applyMove(d);
+    }
+    if (d.mode === 'scale') {
       const f = Math.max(0.1, (pt.x - d.b.x) / d.b.w, (pt.y - d.b.y) / d.b.h);
       editor.transient = { scale: { page: index, f, ox: d.b.x, oy: d.b.y } };
     } else if (d.mode === 'marquee') {
@@ -208,9 +263,15 @@ export function PageView({ editor, state, page, index, pageCount }) {
     const d = drag.current;
     if (!d) return;
     drag.current = null;
+    if (d.raf) cancelAnimationFrame(d.raf);
     const t = editor.transient;
     editor.transient = {};
-    if (d.mode === 'move' && t.move) editor.moveSelection(t.move.dx, t.move.dy);
+    if (d.mode === 'move' && t.move && t.cross) {
+      editor.moveSelectionToPage(t.cross.from, t.cross.to, t.move.dx + t.cross.ox, t.move.dy + t.cross.oy, t.move.dx, t.move.dy);
+      // Keyboard focus follows the pieces to their new page.
+      document.querySelectorAll('.sheet canvas')[t.cross.to]?.focus({ preventScroll: true });
+      editor.requestDraw();
+    } else if (d.mode === 'move' && t.move) editor.moveSelection(t.move.dx, t.move.dy);
     else if (d.mode === 'scale' && t.scale) editor.scaleSelection(index, t.scale.f, t.scale.ox, t.scale.oy);
     else if (d.mode === 'erase' && t.erased?.size) editor.deleteIds(t.erased, `Erased ${t.erased.size} piece${t.erased.size === 1 ? '' : 's'}.`);
     else if (d.mode === 'marquee' && t.marquee) {
