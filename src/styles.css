@@ -331,6 +331,23 @@ details.more > .stack { padding-top: var(--s2); }
 .review input { width: 100%; }
 .crop { max-width: 100%; height: 34px; object-fit: contain; align-self: flex-start; }
 
+/* Write tab */
+.inspector.wide { width: 420px; }
+.palette { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.chord-key { flex-direction: column; gap: 0; min-height: 40px; padding: 2px 0; }
+.chord-key strong { font-size: 13px; }
+.chord-key span { font-size: 10.5px; color: var(--text-2); }
+.write-box { display: flex; height: 320px; border: 1px solid var(--control-line); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+.write-box:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.write-box textarea, .syllables { font: 13px/20px Consolas, "Cascadia Mono", "Courier New", monospace; padding: 8px 0; }
+.write-box textarea { flex: 1; min-width: 0; padding-left: 8px; padding-right: 8px; border: 0; outline: 0; resize: none; white-space: pre; overflow: auto; color: var(--text); background: transparent; }
+.syllables { width: 30px; flex: none; overflow: hidden; background: var(--surface-2); border-right: 1px solid var(--line); color: var(--text-2); text-align: right; }
+.syllables span { display: block; height: 20px; padding-right: 6px; font-size: 11.5px; }
+.syllables span.current { background: var(--accent-soft); color: var(--accent-hover); font-weight: 700; }
+code { padding: 1px 4px; border-radius: 4px; background: var(--surface-3); font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
+.draft-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.draft-list li { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius); overflow-wrap: anywhere; }
+
 /* Print preview */
 .modal.preview { width: min(1120px, 96vw); height: 88vh; }
 .preview-layout { flex: 1; min-height: 0; display: flex; }
@@ -348,6 +365,8 @@ details.more > .stack { padding-top: var(--s2); }
   .segmented .seg-text { display: none; }
 }
 @media (max-width: 1060px) {
+  .inspector .tabs .icon { display: none; }
+  .inspector.wide { width: 330px; }
   .preview-options { width: 240px; }
   .seg-caption, .statusbar .hint, .file-actions .optional { display: none; }
   .inspector { width: 262px; }

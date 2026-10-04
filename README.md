@@ -36,6 +36,23 @@ Other scripts: `npm test` (unit tests), `npm run shots` (captures screenshots of
 - **Library**: every song and setlist lives in one folder (`Documents\ChartShift Library` by default). Export/import the whole library as a zip, or keep the folder inside OneDrive/Google Drive/Dropbox to sync. Setlists save or print as one PDF.
 - **Autosave**: unsaved work is parked 15 seconds after a change and offered back after a crash. Saving the song, opening another, or choosing to close without saving discards the parked copy.
 
+## Writing a song
+
+**New** (Ctrl+N) starts a song from a blank page; opening a ChordPro file (`.cho`) does the same with its contents. A written song is text, edited on the **Write** tab, and the page is laid out from it as you type.
+
+- **Words and chords**: type the lyrics and put each chord in square brackets where it is played, `[G]Amazing [C]grace`. A line such as `Verse 1`, `Chorus` or `[Bridge]` on its own starts a section.
+- **Song details**: title, writer, key, time signature, tempo and capo, shown under the title.
+- **Chords in the key**: once a key is chosen, its seven chords appear as buttons with their numbers (1, 2m, 3m, 4, 5, 6m, 7°); a button puts the chord in at the cursor.
+- **Syllable counts**: a rough count beside every line, for matching lines to each other. It is a guide, not a dictionary.
+- **Song structure** (Sections tab): the sections as a list; move one earlier or later, repeat it, or delete it. This rewrites the text.
+- **Chord diagrams**: guitar or ukulele fingering boxes for the chords used, in a row under the title. Unusual chords are shown as the plainer chord of the same family (C7 for C9); chords with no shape (dim, aug) are left out.
+- **Drafts**: keep a named copy of the words, and go back to it later. Drafts are saved inside the song. Going back keeps what you had as "Before restoring".
+- **Transpose, capo and Nashville numbers** (Chords tab) rewrite the chords in the text.
+
+You can still drag things on the page of a written song, but the page is laid out again the next time the text changes, which puts them back; ChartShift asks before doing that.
+
+A chart opened from a PDF can be turned into a written song with **Turn this chart into editable text** on its Write tab, once its text has been read. This makes a new song from the recognised words and chord positions and leaves the chart as it was.
+
 ## When two PCs change a song
 
 If the library folder is shared through OneDrive, Google Drive, Dropbox or similar, two people can edit the same song.
@@ -89,7 +106,8 @@ Saving as PDF always keeps each page's own size.
 - `src/lib/importer.js` – renders PDF pages (pdf.js) or images at 300 dpi, cleans scans, segments, and attaches the PDF's own text.
 - `src/lib/textlayer.js`, `src/lib/ocr.js` – match recognised words (PDF text or Tesseract OCR) to pieces and mark chords.
 - `src/lib/chords.js`, `src/lib/chordpro.js`, `src/lib/layout.js` – chord maths, ChordPro, fit/enlarge.
-- `src/editor/` – `store.js` (pages, selection, tools, undo), `sections.js`, `music.js`.
+- `src/editor/` – `store.js` (pages, selection, tools, undo), `sections.js`, `music.js`, `writing.js` (written songs: text in, pages out).
+- `src/lib/songtext.js` (song text: structure, syllables, transposing), `src/lib/diagrams.js` (chord shapes, each checked by a test against the notes it should sound), `src/WriteTab.jsx`.
 - `src/App.jsx` (shell: title bar, editing toolbar, welcome screen), `src/PageView.jsx` (one page), `src/Inspector.jsx` (Sections / Chords / Page tabs), `src/dialogs.jsx`, `src/ui.jsx` (shared controls), `src/icons.jsx`, `src/styles.css` (design tokens) – the UI.
 - `src/lib/exporter.js` – flattens pages at 300 dpi into a PDF (pdf-lib) or into images for printing.
 - `src/lib/project.js` – `.chartshift` song files (a zip of `song.json` + sprite sheets), so songs stay editable.
@@ -108,4 +126,5 @@ Saving as PDF always keeps each page's own size.
 | Shift-drag / Alt-drag | Move in a straight line / move without snapping |
 | Ctrl+C / X / V / D | Copy, cut, paste, duplicate |
 | Ctrl+Z / Ctrl+Y | Undo, redo |
+| Ctrl+N | New song |
 | Ctrl+O / L / S / E / P | Open, library, save (Ctrl+Shift+S: save under a new name), save as PDF, print |

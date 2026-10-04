@@ -5,9 +5,11 @@ import { KEY_CHOICES, keyName } from './lib/chords.js';
 import { unreadWords } from './lib/textlayer.js';
 import { Icon } from './icons.jsx';
 import { IconButton, Menu, TabPanel, Tabs } from './ui.jsx';
+import { StructureList, WriteTab } from './WriteTab.jsx';
 
 const SECTION_NAMES = ['Verse 1', 'Verse 2', 'Verse 3', 'Chorus', 'Pre-Chorus', 'Bridge', 'Intro', 'Outro', 'Tag', 'Instrumental', 'Ending'];
 const TABS = [
+  { id: 'write', label: 'Write', icon: 'edit' },
   { id: 'sections', label: 'Sections', icon: 'sections' },
   { id: 'chords', label: 'Chords', icon: 'music' },
   { id: 'page', label: 'Page', icon: 'page' },
@@ -78,6 +80,7 @@ function Sections({ editor, state }) {
 }
 
 function Chords({ editor, state, onReadText, onReview }) {
+  const written = !!state.write;
   const chords = editor.chordList();
   const key = editor.songKey();
   const [spelling, setSpelling] = useState('auto');
@@ -116,7 +119,8 @@ function Chords({ editor, state, onReadText, onReview }) {
             <button type="button" className="btn outline block" onClick={onReadText}><Icon name="scan" />Read the missed text</button>
           </div>
         )}
-        <button type="button" className="btn outline block" onClick={onReview} disabled={none}>Check the chords…</button>
+        {!written && <button type="button" className="btn outline block" onClick={onReview} disabled={none}>Check the chords…</button>}
+        {written && <p className="muted">Changing the key rewrites the chords in the song’s text.</p>}
       </div>
       <div className="group">
         <h3>Transpose</h3>
@@ -155,17 +159,19 @@ function Chords({ editor, state, onReadText, onReview }) {
               </select>
             </label>
             <button type="button" className="btn outline block" disabled={none} onClick={editor.nashville}>Change to Nashville numbers</button>
-            <div className="row bottom">
+            {!written && <div className="row bottom">
               <label className="field grow">Selected piece is the chord
                 <input type="text" value={mark} onChange={(e) => setMark(e.target.value)} placeholder="e.g. Em7" maxLength={16} spellCheck={false} />
               </label>
               <button type="button" className="btn outline" disabled={!state.selection.size || !mark.trim()} onClick={() => editor.markChord(mark)}>Mark</button>
-            </div>
-            <button type="button" className="btn outline block" disabled={!state.selection.size} onClick={() => editor.markChord('')}>Selection is not a chord</button>
-            <label className="check">
-              <input type="checkbox" checked={state.showChords} onChange={(e) => editor.set({ showChords: e.target.checked })} />
-              Underline chords on the page
-            </label>
+            </div>}
+            {!written && <button type="button" className="btn outline block" disabled={!state.selection.size} onClick={() => editor.markChord('')}>Selection is not a chord</button>}
+            {!written && (
+              <label className="check">
+                <input type="checkbox" checked={state.showChords} onChange={(e) => editor.set({ showChords: e.target.checked })} />
+                Underline chords on the page
+              </label>
+            )}
           </div>
         </details>
       </div>
@@ -196,13 +202,14 @@ function PageTools({ editor, onPdf, onPrint, onChordPro }) {
   );
 }
 
-export function Inspector({ editor, state, tab, onTab, onReadText, onReview, onPdf, onPrint, onChordPro }) {
+export function Inspector({ editor, state, tab, onTab, onReadText, onReview, onPdf, onPrint, onChordPro, onConvert }) {
   return (
-    <aside className="inspector" aria-label="Song tools">
+    <aside className={`inspector${tab === 'write' && state.write ? ' wide' : ''}`} aria-label="Song tools">
       <h2 className="sr-only">Song tools</h2>
       <Tabs label="Song tools" tabs={TABS} value={tab} onChange={onTab} prefix={PREFIX} />
       <TabPanel prefix={PREFIX} id={tab} className="inspector-body">
-        {tab === 'sections' && <Sections editor={editor} state={state} />}
+        {tab === 'write' && <WriteTab editor={editor} state={state} onConvert={onConvert} />}
+        {tab === 'sections' && (state.write ? <StructureList editor={editor} state={state} /> : <Sections editor={editor} state={state} />)}
         {tab === 'chords' && <Chords editor={editor} state={state} onReadText={onReadText} onReview={onReview} />}
         {tab === 'page' && <PageTools editor={editor} onPdf={onPdf} onPrint={onPrint} onChordPro={onChordPro} />}
       </TabPanel>

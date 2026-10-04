@@ -64,6 +64,7 @@ export function installMusic(ed) {
 
   /** The song's key, guessed from its first chord. */
   ed.songKey = () => {
+    if (state().write) return ed.writtenKey();
     for (const chord of ed.chordList()) {
       const key = keyOf(chord.text);
       if (key) return key;
@@ -124,6 +125,7 @@ export function installMusic(ed) {
 
   /** spelling: 'auto' picks sharps or flats to suit the new key. */
   ed.transpose = (semitones, spelling = 'auto') => {
+    if (state().write) return ed.transposeWritten(semitones, spelling);
     const key = ed.songKey();
     if (!key) return ed.set({ status: 'No chords found yet. Use “Read text” on a scan, or select a chord and use “Mark as chord”.' });
     const target = { index: (key.index + semitones + 120) % 12, minor: key.minor };
@@ -136,6 +138,7 @@ export function installMusic(ed) {
   };
 
   ed.nashville = () => {
+    if (state().write) return ed.nashvilleWritten();
     const key = ed.songKey();
     if (!key) return ed.set({ status: 'No chords found yet.' });
     rewriteChords((text) => toNashville(text, key), (count) => `Changed ${count} chords to Nashville numbers in ${keyName(key)}.`);
@@ -143,6 +146,7 @@ export function installMusic(ed) {
 
   // Capo: the chord shapes drop by `fret` semitones and a "Capo N" note is added.
   ed.capo = (fret) => {
+    if (state().write) return ed.capoWritten(fret);
     const key = ed.songKey();
     if (!key || !fret) return ed.set({ status: key ? 'Choose a capo fret first.' : 'No chords found yet.' });
     const before = state().pages;

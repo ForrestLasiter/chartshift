@@ -4,13 +4,16 @@ import { PageView } from './PageView.jsx';
 import { Inspector } from './Inspector.jsx';
 import { Icon, Logo } from './icons.jsx';
 import { IconButton, Menu, Segmented } from './ui.jsx';
-import { ChordReviewDialog, ConflictDialog, LibraryDialog, NameDialog, PrintPreviewDialog } from './dialogs.jsx';
+import { ChordReviewDialog, ConflictDialog, LibraryDialog, NameDialog, NewSongDialog, PrintPreviewDialog } from './dialogs.jsx';
 import { importPdf, importImage } from './lib/importer.js';
 import { loadProject, saveProject } from './lib/project.js';
 import { exportPdf, exportSetlistPdf, printImages } from './lib/exporter.js';
-import { exportChordPro, layoutChordPro, parseChordPro } from './lib/chordpro.js';
+import { exportChordPro } from './lib/chordpro.js';
+import { joinChordPro, splitChordPro } from './lib/songtext.js';
+import { newWrite } from './editor/writing.js';
 import { renderPageCanvas } from './lib/render.js';
 import { FONTS } from './lib/text.js';
+import { keyName } from './lib/chords.js';
 import { createRecoveryQueue } from './lib/recoveryQueue.js';
 import { planPrint } from './lib/printPlan.js';
 import { LIMITS } from './lib/songSchema.js';
@@ -87,6 +90,15 @@ export function App() {
     setTimeout(() => editor.set({ zoom: fitZoom(doc.pages[0]) }), 0);
   }, [editor, fitZoom, recovery]);
 
+  // Opens a song that is written as text, on the Write tab.
+  const startWritten = useCallback((write, name, status) => {
+    editor.startWriting(write, { name, status });
+    recovery.clear().catch(() => {});
+    setInspectorOpen(true);
+    setInspectorTab('write');
+    setTimeout(() => editor.set({ zoom: fitZoom(editor.getState().pages[0]) }), 0);
+  }, [editor, recovery, fitZoom]);
+
   // `saved` = { name, version } when the file came from the library.
   const openInto = useCallback(async (file, saved, progress) => {
     const ext = extension(file.name);
@@ -95,14 +107,15 @@ export function App() {
     if (ext === 'chartshift') {
       const doc = await loadProject(file.data);
       showDoc({ ...doc, name, savedAs: saved?.name ?? null, baseVersion: saved?.version ?? null, status: `Opened ${name}: ${plural(doc.pages.length, 'page')}.` });
+      if (doc.write) setInspectorTab('write');
       return;
     }
     const ids = { piece: 1, group: 1, page: 1 };
     if (CHORDPRO_EXT.has(ext)) {
       if (file.data.byteLength > LIMITS.chordProBytes) throw new Error('It is too large to be a ChordPro text file.');
-      const song = parseChordPro(new TextDecoder().decode(file.data));
-      const laidOut = layoutChordPro(song, ids);
-      showDoc({ pages: laidOut, atlases: [], ids, name: song.title || name, status: `Opened ChordPro song ${song.title || name}: ${plural(laidOut.length, 'page')}. Every line is an editable text box.` });
+      // A ChordPro file is a written song: its text stays editable on the Write tab.
+      const { meta, text } = splitChordPro(new TextDecoder().decode(file.data));
+      startWritten({ ...newWrite(meta, text) }, meta.title || name, `Opened ChordPro song ${meta.title || name}. Edit its words and chords on the Write tab.`);
       return;
     }
     const atlases = [];
@@ -120,7 +133,7 @@ export function App() {
       pages: imported, atlases, ids, name,
       status: `Opened ${file.name}: ${plural(imported.length, 'page')}, ${count} movable pieces${extras.length ? `; ${extras.join(', ')}` : ''}.${hint}`,
     });
-  }, [showDoc]);
+  }, [showDoc, startWritten]);
 
   // A file that cannot be opened leaves the current song untouched and says why.
   const loadFile = useCallback((file, saved = null) => run('Opening…', async (progress) => {
@@ -167,7 +180,7 @@ export function App() {
   // the user is asked what to do. See the README, "When two PCs change a song".
   const writeSong = useCallback((name, { expect = null, onConflict = 'ask' } = {}) => run('Saving song…', async () => {
     const st = editor.getState();
-    const data = await saveProject({ pages: st.pages, atlases: editor.atlases, ids: editor.ids });
+    const data = await saveProject({ pages: st.pages, atlases: editor.atlases, ids: editor.ids, write: st.write });
     const result = await platform.library.write(name, data, { expect, onConflict });
     if (result.conflict) return setDialog({ type: 'conflict', conflict: result.conflict, expect });
     recovery.clear().catch(() => {});
@@ -215,11 +228,28 @@ export function App() {
 
   const saveChordPro = useCallback(async () => {
     const st = editor.getState();
-    const text = exportChordPro(st.pages, st.name || 'Untitled');
+    const text = st.write ? joinChordPro({ ...st.write.meta, title: st.write.meta.title || st.name }, st.write.text) : exportChordPro(st.pages, st.name || 'Untitled');
     if (!text) return editor.set({ status: 'There is no readable text to export yet. For a scan, use “Read text from scan” first.' });
     const saved = await platform.saveFile({ kind: 'cho', suggestedName: `${st.name || 'Untitled'}.cho`, data: new TextEncoder().encode(text) });
     if (saved) editor.set({ status: `Exported ChordPro file ${saved.name}.` });
   }, [editor]);
+
+  const newSong = useCallback((meta) => {
+    setDialog(null);
+    startWritten(newWrite(meta, 'Verse 1\n\n\nChorus\n'), meta.title || 'Untitled song');
+  }, [startWritten]);
+
+  // Makes a typed song out of a chart's recognised text. The chart itself is left as it is.
+  const convertToText = useCallback(() => {
+    const st = editor.getState();
+    const source = exportChordPro(st.pages, st.name || 'Untitled');
+    if (!source) return editor.set({ status: 'This chart has no readable text yet. On the Chords tab, use “Read text from scan” first.' });
+    if (!confirmDiscard()) return;
+    const { meta, text } = splitChordPro(source);
+    const key = editor.songKey();
+    startWritten(newWrite({ ...meta, key: key ? keyName(key) : '' }, text), `${st.name || 'Untitled'} (text)`,
+      'Made a typed copy of the chart. Check the words and chord positions; the original chart was not changed.');
+  }, [editor, startWritten, confirmDiscard]);
 
   // OCR every page that still has unread pieces, then let the user check the chords.
   const readText = useCallback(() => run('Reading text…', async (progress) => {
@@ -310,7 +340,7 @@ export function App() {
     const timer = setTimeout(() => {
       recovery.save(async () => {
         const st = editor.getState();
-        const data = await saveProject({ pages: st.pages, atlases: editor.atlases, ids: editor.ids });
+        const data = await saveProject({ pages: st.pages, atlases: editor.atlases, ids: editor.ids, write: st.write });
         return { meta: { name: st.name, savedAs: st.savedAs, baseVersion: st.baseVersion }, data };
       }).catch((error) => console.error('autosave failed', error));
     }, AUTOSAVE_MS);
@@ -338,6 +368,7 @@ export function App() {
         try {
           const doc = await loadProject(parked.data);
           showDoc({ ...doc, name: parked.meta.name, savedAs: parked.meta.savedAs, baseVersion: parked.meta.baseVersion, status: 'Unsaved work restored. Save it to keep it.' }, { keepRecovery: true });
+          if (doc.write) setInspectorTab('write');
           editor.set({ dirty: true });
         } catch (error) {
           editor.set({ status: `The unsaved work could not be restored. ${error.message}` });
@@ -359,6 +390,7 @@ export function App() {
       const key = e.key.toLowerCase();
       const done = () => e.preventDefault();
       if (mod && key === 'o') { done(); open(); return; }
+      if (mod && key === 'n') { done(); if (confirmDiscard()) setDialog('newSong'); return; }
       if (mod && key === 'l') { done(); setDialog('library'); return; }
       if (!st.pages) return;
       if (mod) {
@@ -395,7 +427,7 @@ export function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [editor, open, saveSong, savePdf, print, stepZoom]);
+  }, [editor, open, saveSong, savePdf, print, stepZoom, confirmDiscard]);
 
   const selectedText = hasDoc && pages.some((page) => page.pieces.some((p) => p.kind === 'text' && selection.has(p.id)));
   const showText = hasDoc && (state.tool === 'text' || state.editing || selectedText);
@@ -419,6 +451,7 @@ export function App() {
           )}
         </div>
         <div className="file-actions" role="toolbar" aria-label="File">
+          <button type="button" className="btn" onClick={() => { if (confirmDiscard()) setDialog('newSong'); }} title="Write a new song from a blank page (Ctrl+N)"><Icon name="plus" />New</button>
           <button type="button" className="btn" onClick={open} title="Open a PDF, image, ChordPro file or song (Ctrl+O)"><Icon name="folder" />Open</button>
           <button type="button" className="btn" onClick={() => setDialog('library')} title="Saved songs and setlists (Ctrl+L)"><Icon name="library" />Library</button>
           <button type="button" className="btn primary" onClick={() => saveSong(false)} disabled={!hasDoc} title="Save to the library (Ctrl+S)"><Icon name="save" />Save</button>
@@ -493,9 +526,10 @@ export function App() {
           ) : (
             <div className="welcome">
               <div className="welcome-head"><Logo size={40} /><h1>ChartShift</h1></div>
-              <p className="lead">Open a chord chart, tab or sheet music PDF. Every line, word and letter becomes a piece you can move, erase or copy. Add text, change the key, then save it as a PDF or print it.</p>
+              <p className="lead">Open a chord chart, tab or sheet music PDF and every line, word and letter becomes a piece you can move, erase or copy. Or start from a blank page and write a song of your own. Change the key, then save it as a PDF or print it.</p>
               <div className="welcome-actions">
                 <button type="button" className="btn primary large" onClick={open}><Icon name="folder" />Open a PDF or image…</button>
+                <button type="button" className="btn outline large" onClick={() => setDialog('newSong')}><Icon name="edit" />Write a new song</button>
                 <button type="button" className="btn outline large" onClick={() => setDialog('library')}><Icon name="library" />Song library</button>
               </div>
               <h2>Recent songs</h2>
@@ -518,7 +552,7 @@ export function App() {
         </main>
         {hasDoc && inspectorOpen && (
           <Inspector editor={editor} state={state} tab={inspectorTab} onTab={setInspectorTab}
-            onReadText={readText} onReview={() => setDialog('review')} onPdf={savePdf} onPrint={print} onChordPro={saveChordPro} />
+            onReadText={readText} onReview={() => setDialog('review')} onPdf={savePdf} onPrint={print} onChordPro={saveChordPro} onConvert={convertToText} />
         )}
       </div>
 
@@ -534,6 +568,7 @@ export function App() {
           onSetlistPrint={(s) => { setDialog(null); setlistPrint(s); }}
           notify={(status) => editor.set({ status })} />
       )}
+      {dialogType === 'newSong' && <NewSongDialog onCreate={newSong} onClose={() => setDialog(null)} />}
       {dialogType === 'review' && <ChordReviewDialog editor={editor} onClose={() => setDialog(null)} />}
       {dialogType === 'saveName' && (
         <NameDialog title="Save song" label="Song name" initial={state.name || 'Untitled'} action="Save to library"

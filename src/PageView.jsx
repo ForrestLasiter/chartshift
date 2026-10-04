@@ -64,7 +64,9 @@ function TextEditor({ editor, piece, zoom }) {
 export function PageView({ editor, state, page, index, pageCount }) {
   const canvasRef = useRef(null);
   const drag = useRef(null);
-  const { zoom, selection, editing, tool, showChords } = state;
+  const { zoom, selection, editing, tool } = state;
+  // The underline is for checking chords found on a scan; a typed song needs no such mark.
+  const showChords = state.showChords && !state.write;
   const hiddenId = editing?.piece.id;
 
   const draw = useCallback(() => {

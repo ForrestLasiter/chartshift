@@ -6,6 +6,7 @@ import { DEFAULT_TEXT_STYLE, measureText } from '../lib/text.js';
 import { boundsOf } from '../lib/render.js';
 import { installSections } from './sections.js';
 import { installMusic } from './music.js';
+import { installWriting } from './writing.js';
 
 const MAX_UNDO = 200;
 export const LEVELS = ['section', 'block', 'line', 'word', 'letter'];
@@ -29,6 +30,8 @@ export function createEditor() {
     savedAs: null, // name in the library, once saved there
     baseVersion: null, // version of the library copy this song was last read from or saved as
     showChords: true,
+    write: null, // a written song's text and facts (see writing.js); null for charts opened from a PDF
+    layoutEdited: false, // a written song's page has been rearranged by hand since it was last laid out
     dirty: false,
     busy: '',
     status: 'Open a PDF, image or song to begin.',
@@ -53,8 +56,9 @@ export function createEditor() {
     undoStack.push(state.pages);
     if (undoStack.length > MAX_UNDO) undoStack.shift();
     redoStack.length = 0;
-    set({ pages, dirty: true, ...patch });
+    set({ pages, dirty: true, ...(state.write ? { layoutEdited: true } : null), ...patch });
   };
+  ed.clearHistory = () => { undoStack.length = 0; redoStack.length = 0; };
 
   ed.getState = () => state;
   ed.subscribe = (fn) => { subscribers.add(fn); return () => subscribers.delete(fn); };
@@ -70,13 +74,13 @@ export function createEditor() {
   };
   ed.set = set;
 
-  ed.setDoc = ({ pages, atlases, ids, name, savedAs = null, baseVersion = null, status }) => {
+  ed.setDoc = ({ pages, atlases, ids, name, savedAs = null, baseVersion = null, write = null, status }) => {
     ed.atlases = atlases;
     ed.ids = ids;
     ed.transient = {};
     undoStack.length = 0;
     redoStack.length = 0;
-    set({ pages, selection: new Set(), activePage: 0, editing: null, name, savedAs, baseVersion, dirty: false, status });
+    set({ pages, selection: new Set(), activePage: 0, editing: null, name, savedAs, baseVersion, write, layoutEdited: false, dirty: false, status });
   };
 
   const selectedOn = (page) => page.pieces.filter((p) => state.selection.has(p.id));
@@ -400,6 +404,7 @@ export function createEditor() {
 
   installSections(ed);
   installMusic(ed);
+  installWriting(ed);
   return ed;
 }
 

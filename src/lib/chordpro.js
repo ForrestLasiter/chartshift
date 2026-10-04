@@ -2,6 +2,7 @@
 // format most worship and songbook apps understand:  [G]Morning [C]light
 import { isChord, isChordLine } from './chords.js';
 import { LINE_HEIGHT, measureText } from './text.js';
+import { DIAGRAM_SIZE, shapeFor } from './diagrams.js';
 
 // Words that name a part of a song.
 const PART = '(?:verse|chorus|pre[- ]?chorus|post[- ]?chorus|bridge|intro|outro|tag|interlude|instrumental|ending|refrain|turnaround|vamp|solo|hook|break|breakdown|coda|riff|lead|link|middle ?8)';
@@ -37,8 +38,19 @@ export function sectionLabel(text) {
 
 export const isSectionHeader = (text) => sectionLabel(text) !== null;
 
+/**
+ * If a line of song text is a section heading, its name; otherwise null.
+ * "[Chorus]" is a heading; "[G]" and "[G]Amazing grace" are not.
+ */
+export function headingOf(line) {
+  const text = line.trim();
+  if (!text) return null;
+  if (text.includes('[') && !/^\[[^\]]*\]\s*(?:\(?x\s*\d+\)?)?[:.]?$/i.test(text)) return null;
+  return sectionLabel(text);
+}
+
 export function parseChordPro(source) {
-  const song = { title: '', subtitle: '', key: '', capo: '', lines: [] };
+  const song = { title: '', subtitle: '', key: '', capo: '', tempo: '', time: '', lines: [] };
   for (const raw of source.replace(/\r/g, '').split('\n')) {
     const line = raw.trimEnd();
     if (line.startsWith('#')) continue;
@@ -50,6 +62,8 @@ export function parseChordPro(source) {
       else if (name === 'subtitle' || name === 'st' || name === 'artist') song.subtitle = song.subtitle || value;
       else if (name === 'key') song.key = value;
       else if (name === 'capo') song.capo = value;
+      else if (name === 'tempo') song.tempo = value;
+      else if (name === 'time') song.time = value;
       else if (name === 'comment' || name === 'c' || name === 'ci' || name === 'comment_italic') song.lines.push({ type: 'comment', text: value });
       else if (/^(start_of_|so)/.test(name)) {
         const kind = name.replace(/^start_of_/, '').replace(/^so/, '');
@@ -59,6 +73,9 @@ export function parseChordPro(source) {
       continue;
     }
     if (!line.trim()) { song.lines.push({ type: 'blank' }); continue; }
+    // A heading on a line of its own starts a section that runs to the next heading.
+    const heading = headingOf(line);
+    if (heading) { song.lines.push({ type: 'heading', label: heading }); continue; }
     const chords = [];
     let lyric = '';
     let rest = line;
@@ -77,8 +94,11 @@ export function parseChordPro(source) {
   return song;
 }
 
-/** Lays a parsed ChordPro song out as pages of text boxes. */
-export function layoutChordPro(song, ids) {
+/**
+ * Lays a parsed song out as pages of text boxes.
+ * options.diagrams: 'guitar' | 'ukulele' adds a row of chord diagrams under the header.
+ */
+export function layoutChordPro(song, ids, { diagrams = null } = {}) {
   const pages = [];
   let page = null, y = 0, section = null;
   const newPage = () => {
@@ -103,15 +123,33 @@ export function layoutChordPro(song, ids) {
   newPage();
   if (song.title) { add(song.title, PAGE.margin, y, { size: 20, bold: true }); y += 28; }
   if (song.subtitle) { add(song.subtitle, PAGE.margin, y, { size: 11 }); y += 16; }
-  const facts = [song.key && `Key: ${song.key}`, song.capo && `Capo: ${song.capo}`].filter(Boolean).join('    ');
+  const facts = [
+    song.key && `Key: ${song.key}`, song.tempo && `Tempo: ${song.tempo}`, song.time && `Time: ${song.time}`, song.capo && `Capo: ${song.capo}`,
+  ].filter(Boolean).join('    ');
   if (facts) { add(facts, PAGE.margin, y, { size: 11, italic: true }); y += 16; }
   y += 10;
+
+  if (diagrams) {
+    // One diagram per distinct chord, in order of first appearance.
+    const names = [];
+    for (const line of song.lines) for (const chord of line.chords || []) if (isChord(chord.name) && !names.includes(chord.name)) names.push(chord.name);
+    const drawable = names.filter((name) => shapeFor(name, diagrams));
+    let x = PAGE.margin;
+    for (const name of drawable) {
+      if (x + DIAGRAM_SIZE.w > PAGE.w - PAGE.margin) { x = PAGE.margin; y += DIAGRAM_SIZE.h + 8; }
+      page.pieces.push({ id: ids.piece++, kind: 'diagram', chord: name, instrument: diagrams, x, y, w: DIAGRAM_SIZE.w, h: DIAGRAM_SIZE.h });
+      x += DIAGRAM_SIZE.w + 10;
+    }
+    if (drawable.length) y += DIAGRAM_SIZE.h + 18;
+  }
 
   for (const line of song.lines) {
     if (line.type === 'blank') { y += 10; if (section?.implicit) section = null; continue; }
     if (line.type === 'end') { section = null; y += 6; continue; }
-    if (line.type === 'start') {
+    if (line.type === 'start' || line.type === 'heading') {
       room(40);
+      // Room above a heading for the section's name tag in the editor.
+      if (line.type === 'heading' && page.pieces.some((p) => p.section != null)) y += 12;
       startSection(line.label);
       add(line.label, PAGE.margin, y, { bold: true });
       y += 18;

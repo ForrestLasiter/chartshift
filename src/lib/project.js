@@ -13,12 +13,12 @@ const canvasToBlob = (canvas) => {
   return encoded.get(canvas);
 };
 
-export async function saveProject({ pages, atlases, ids }) {
+export async function saveProject({ pages, atlases, ids, write = null }) {
   const zip = new JSZip();
   // Only keep atlases that some piece still uses.
   const used = new Set();
   for (const page of pages) for (const p of page.pieces) if (p.kind === 'clip') used.add(p.atlas);
-  zip.file('song.json', JSON.stringify({ format: FORMAT, version: VERSION, ids, atlasCount: atlases.length, pages }));
+  zip.file('song.json', JSON.stringify({ format: FORMAT, version: VERSION, ids, atlasCount: atlases.length, pages, ...(write ? { write } : null) }));
   for (let i = 0; i < atlases.length; i++) {
     if (!used.has(i)) continue;
     const blob = await canvasToBlob(atlases[i]);
@@ -79,5 +79,5 @@ export async function loadProject(data) {
       if (p.sx + p.sw > atlas.width || p.sy + p.sh > atlas.height) throw new Error('This song file is damaged: a piece points outside its picture.');
     }
   }
-  return { pages: song.pages, atlases, ids: song.ids };
+  return { pages: song.pages, atlases, ids: song.ids, write: song.write };
 }

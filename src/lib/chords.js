@@ -99,3 +99,20 @@ export function toNashville(text, key) {
 }
 
 export const KEY_CHOICES = SHARPS.map((_, index) => ({ index, name: noteName(index, FLAT_MAJOR.has(index)) }));
+
+/** "F#m" -> { index, minor }, or null if it is not a key. */
+export function parseKey(name) {
+  const match = String(name || '').trim().match(/^([A-G](?:#|b|♯|♭)?)(m|min|minor)?$/i);
+  if (!match) return null;
+  return { index: noteIndex(match[1][0].toUpperCase() + match[1].slice(1)), minor: !!match[2] };
+}
+
+const MAJOR_SCALE = [[0, '', '1'], [2, 'm', '2m'], [4, 'm', '3m'], [5, '', '4'], [7, '', '5'], [9, 'm', '6m'], [11, 'dim', '7°']];
+const MINOR_SCALE = [[0, 'm', '1m'], [2, 'dim', '2°'], [3, '', 'b3'], [5, 'm', '4m'], [7, 'm', '5m'], [8, '', 'b6'], [10, '', 'b7']];
+
+/** The chords that belong to a key, with their scale-degree numbers: [{ name, number }]. */
+export function chordsInKey(key) {
+  if (!key) return [];
+  const flats = prefersFlats(key);
+  return (key.minor ? MINOR_SCALE : MAJOR_SCALE).map(([step, quality, number]) => ({ name: noteName(key.index + step, flats) + quality, number }));
+}

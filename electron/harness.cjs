@@ -114,10 +114,12 @@ function runSmoke(win, { output, withPrintWindow, preload }) {
       key(document.activeElement, 'Escape'); await sleep(100);
       a11y.menuEscapeCloses = !document.querySelector('[role=menu]') && document.activeElement === more && more.getAttribute('aria-expanded') === 'false';
       const tabs = [...document.querySelectorAll('.inspector [role=tab]')];
-      tabs[0].focus(); key(tabs[0], 'ArrowRight'); await sleep(100);
+      const at = tabs.findIndex((t) => t.getAttribute('aria-selected') === 'true');
+      tabs[at].focus(); key(tabs[at], 'ArrowRight'); await sleep(100);
       const now = [...document.querySelectorAll('.inspector [role=tab]')];
-      a11y.tabsArrow = now[1].getAttribute('aria-selected') === 'true' && document.activeElement === now[1] && now[0].tabIndex === -1
-        && !!document.getElementById(now[1].getAttribute('aria-controls'));
+      const next = now[(at + 1) % now.length];
+      a11y.tabsArrow = next.getAttribute('aria-selected') === 'true' && document.activeElement === next && now[at].tabIndex === -1
+        && now.filter((t) => t.tabIndex === 0).length === 1 && !!document.getElementById(next.getAttribute('aria-controls'));
       const opener = [...document.querySelectorAll('.file-actions button')].find((b) => b.textContent.trim() === 'Library');
       opener.focus(); opener.click(); await sleep(400);
       const dialog = document.querySelector('dialog[open]');
@@ -198,6 +200,64 @@ function runSmoke(win, { output, withPrintWindow, preload }) {
       preview1.closed = !document.querySelector('dialog[open]');
       __editor.undo();
       out.printPreview = preview1;
+
+      // Songwriting: start a new song, type it, and use the writing tools.
+      window.confirm = () => true; // "discard changes?" would otherwise wait for a person
+      const setValue = (el, value) => {
+        const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : el.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+        Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, value);
+        el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
+      };
+      const S = () => __editor.getState();
+      const pageText = () => S().pages.flatMap((pg) => pg.pieces.filter((q) => q.kind === 'text').sort((x, y) => x.y - y.y || x.x - y.x).map((q) => q.text));
+      const w = {};
+      press('New'); await sleep(300);
+      w.dialog = document.querySelector('dialog[open] h2').textContent;
+      setValue(document.querySelector('dialog[open] input[type=text]'), 'Morning Song');
+      await sleep(50);
+      document.querySelector('dialog[open] form').requestSubmit(); await sleep(400);
+      w.tab = document.querySelector('.inspector [role=tab][aria-selected=true]').textContent.trim();
+      w.name = S().name;
+      w.blankPage = pageText();
+      const area = document.querySelector('.write-box textarea');
+      setValue(area, 'Verse 1\\n[G]Morning light is [C]on the hills\\n[Em]Every shadow [D]fades\\n\\nChorus\\n[C]Lift it [G]up, let it ring'); await sleep(200);
+      w.pageAfterTyping = pageText();
+      w.chordPieces = S().pages[0].pieces.filter((q) => q.chord).map((q) => q.text);
+      w.sectionsOnPage = __editor.sectionList(0).map((x) => x.label);
+      w.syllables = [...document.querySelectorAll('.syllables span')].map((x) => x.textContent);
+      w.palette = [...document.querySelectorAll('.palette button')].map((x) => x.textContent);
+      // A palette button puts its chord in at the cursor.
+      area.focus(); area.setSelectionRange(area.value.length, area.value.length);
+      document.querySelectorAll('.palette button')[4].click(); await sleep(200);
+      w.inserted = S().write.text.endsWith('[D]');
+      // Chord diagrams.
+      setValue([...document.querySelectorAll('.inspector select')].find((x) => [...x.options].some((o) => o.textContent === 'Ukulele')), 'guitar'); await sleep(200);
+      w.diagrams = S().pages[0].pieces.filter((q) => q.kind === 'diagram').map((q) => q.chord);
+      // Drafts.
+      [...document.querySelectorAll('details.more summary')].find((x) => x.textContent.startsWith('Drafts')).click(); await sleep(100);
+      document.querySelector('.inspector form').requestSubmit(); await sleep(150);
+      w.draftSaved = S().write.drafts.map((d) => d.name);
+      // Transposing a written song rewrites its text and its key.
+      __editor.transpose(2); await sleep(100);
+      w.transposed = [S().write.text.split('\\n')[1], S().write.meta.key];
+      __editor.restoreDraft(0); await sleep(100);
+      w.restored = [S().write.text.split('\\n')[1], S().write.meta.key, S().write.drafts.map((d) => d.name)];
+      // Structure: move the chorus before the verse.
+      press('Sections'); await sleep(150);
+      w.structure = [...document.querySelectorAll('.section-row strong')].map((x) => x.textContent);
+      press('Move Chorus earlier'); await sleep(150);
+      w.reordered = S().write.text.split('\\n')[0] + ' / ' + __editor.sectionList(0).map((x) => x.label).join(',');
+      // Save, reopen from the library, and the song is still a written song.
+      press('Save'); await sleep(300);
+      document.querySelector('dialog[open] form').requestSubmit(); await sleep(1200);
+      w.savedAs = S().savedAs;
+      const textBefore = S().write.text;
+      press('Library'); await sleep(400);
+      press('Open Morning Song', document.querySelector('dialog[open]')); await sleep(1500);
+      w.reopened = { write: !!S().write, sameText: S().write && S().write.text === textBefore, title: S().write && S().write.meta.title, drafts: S().write && S().write.drafts.length, diagrams: S().write && S().write.diagrams, tab: document.querySelector('.inspector [role=tab][aria-selected=true]').textContent.trim(), diagramPieces: S().pages[0].pieces.filter((q) => q.kind === 'diagram').length };
+      w.unnamed = [...document.querySelectorAll('button')].filter((el) => !named(el)).length + [...document.querySelectorAll('input, select, textarea')].filter((el) => !labelled(el)).length;
+      await window.chartshift.library.remove('Morning Song').catch(() => {});
+      out.writing = w;
       return out;
     } catch (error) { return { pageError: String(error && error.stack || error) }; } })()`);
     if (report.pageError) throw new Error('in-page checks failed: ' + report.pageError);
@@ -327,6 +387,23 @@ const SCENES = [
     window.__drop = () => fire('pointerup', b.left + 150 * z, b.top + 420 * z);
     await __h.sleep(200);`],
   ['12-after-drop', `window.__drop(); await __h.sleep(200);`],
+  ['13-new-song-dialog', `
+    await __h.closeDialog();
+    window.confirm = () => true;
+    await __h.press('New');`],
+  ['14-write-tab', `
+    __h.type(document.querySelector('dialog[open] input[type=text]'), 'Morning Song');
+    document.querySelector('dialog[open] form').requestSubmit();
+    await __h.sleep(400);
+    __h.type(document.querySelector('.write-box textarea'), 'Verse 1\\n[G]Morning light is [C]on the hills again\\n[Em]Every shadow [C]starts to fade a[D]way\\n\\nChorus\\n[C]Lift it [G]up, lift it [D]up, let it [Em]ring\\n[C]All to[G]gether [D]now we [G]sing\\n\\nVerse 2\\n[G]Evening comes and [C]still the song re[G]mains');
+    __h.type([...document.querySelectorAll('.inspector select')].find((x) => [...x.options].some((o) => o.textContent === 'Ukulele')), 'guitar');
+    await __h.press('Fit');
+    await __h.sleep(300);`],
+  ['15-write-structure', `await __h.press('Sections');`],
+  ['16-write-chords', `await __h.press('Chords');`],
+  ['17-back-to-sample', `
+    document.querySelector('.inspector [role=tab]').click();
+    await __h.sleep(100);`],
 ];
 
 function runShots(win, { folder }) {

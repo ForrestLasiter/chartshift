@@ -5,6 +5,7 @@ import { library } from './lib/platform.js';
 import { PAPERS, defaultChoice, describeSheet, nearestPaper, pageSizes, placeOnSheet, planPrint } from './lib/printPlan.js';
 import { Icon } from './icons.jsx';
 import { IconButton, TabPanel, Tabs } from './ui.jsx';
+import { KeySelect, TIMES } from './WriteTab.jsx';
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -502,6 +503,42 @@ export function PrintPreviewDialog({ docs, onPrint, onClose }) {
         <footer className="modal-foot">
           <button type="button" className="btn outline" onClick={onClose}>Cancel</button>
           <button type="submit" className="btn primary"><Icon name="print" />Print…</button>
+        </footer>
+      </form>
+    </Modal>
+  );
+}
+
+// Starts a song from a blank page.
+export function NewSongDialog({ onCreate, onClose }) {
+  const [meta, setMeta] = useState({ title: '', artist: '', key: 'G', tempo: '', time: '4/4', capo: '' });
+  const set = (name, value) => setMeta((old) => ({ ...old, [name]: value }));
+  const id = useId();
+  return (
+    <Modal title="New song" onClose={onClose}>
+      <form onSubmit={(e) => { e.preventDefault(); onCreate(meta); }}>
+        <div className="modal-body">
+          <label className="field" htmlFor={`${id}-title`}>Title</label>
+          <input id={`${id}-title`} type="text" value={meta.title} maxLength={120} placeholder="Untitled song" onChange={(e) => set('title', e.target.value)} />
+          <div className="row bottom">
+            <label className="field grow">Key
+              <KeySelect value={meta.key} onChange={(v) => set('key', v)} />
+            </label>
+            <label className="field grow">Time
+              <select value={meta.time} onChange={(e) => set('time', e.target.value)}>
+                <option value="">Not set</option>
+                {TIMES.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </label>
+            <label className="field grow">Tempo
+              <input type="number" min="30" max="300" value={meta.tempo} placeholder="e.g. 90" onChange={(e) => set('tempo', e.target.value.slice(0, 3))} />
+            </label>
+          </div>
+          <p className="muted">All of these can be changed later on the Write tab.</p>
+        </div>
+        <footer className="modal-foot">
+          <button type="button" className="btn outline" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn primary">Start writing</button>
         </footer>
       </form>
     </Modal>

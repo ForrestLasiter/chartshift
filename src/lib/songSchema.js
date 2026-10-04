@@ -23,6 +23,8 @@ export const LIMITS = {
   pieces: 300000,
   sections: 500,
   textLength: 20000,
+  songText: 200000,       // the typed words of a written song
+  drafts: 30,
 };
 
 const FORMAT = 'chartshift-song';
@@ -74,15 +76,38 @@ function cleanPiece(p, atlasCount, where) {
       color: typeof p.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(p.color) ? p.color : '#000000',
     });
     if (p.chord === true) out.chord = true;
+  } else if (p.kind === 'diagram') {
+    if (typeof p.chord !== 'string' || !(p.instrument === 'guitar' || p.instrument === 'ukulele')) fail(`${where} is not a valid chord diagram.`);
+    Object.assign(out, { chord: p.chord.slice(0, 24), instrument: p.instrument });
   } else {
     fail(`${where} is of an unknown kind.`);
   }
   return out;
 }
 
+const META_FIELDS = ['title', 'artist', 'key', 'tempo', 'time', 'capo'];
+const cleanMeta = (meta) => Object.fromEntries(META_FIELDS.map((name) => [name, typeof meta?.[name] === 'string' ? meta[name].slice(0, 120) : '']));
+
+// The typed part of a written song: its facts, words, and saved drafts.
+function cleanWrite(write) {
+  if (write == null) return null;
+  if (typeof write !== 'object' || typeof write.text !== 'string') fail('The written part of this song is damaged.');
+  if (write.text.length > LIMITS.songText) fail('The words of this song are too long to open.');
+  const drafts = Array.isArray(write.drafts) ? write.drafts : [];
+  if (drafts.length > LIMITS.drafts) fail('This song has too many drafts.');
+  return {
+    meta: cleanMeta(write.meta),
+    text: write.text,
+    diagrams: write.diagrams === 'guitar' || write.diagrams === 'ukulele' ? write.diagrams : null,
+    drafts: drafts.filter((d) => d && typeof d.text === 'string' && d.text.length <= LIMITS.songText).map((d) => ({
+      name: (str(d.name, 80) || 'Draft'), saved: str(d.saved, 40) || '', text: d.text, meta: cleanMeta(d.meta),
+    })),
+  };
+}
+
 /**
  * Checks the parsed song.json and returns a cleaned copy:
- * { pages, atlasCount, ids }. Throws an Error with a readable message.
+ * { pages, atlasCount, ids, write }. Throws an Error with a readable message.
  */
 export function validateSong(song) {
   try {
@@ -123,7 +148,7 @@ export function validateSong(song) {
       return { id: page.id, w: page.w, h: page.h, pieces, sections };
     });
     // Counters are rebuilt from the content, so new ids can never collide.
-    return { pages, atlasCount, ids: { piece: maxPiece + 1, group: maxGroup + 1, page: maxPage + 1 } };
+    return { pages, atlasCount, ids: { piece: maxPiece + 1, group: maxGroup + 1, page: maxPage + 1 }, write: cleanWrite(song.write) };
   } catch (error) {
     if (error instanceof SongError) throw new Error(error.message);
     throw new Error('This song file is damaged and cannot be opened.');

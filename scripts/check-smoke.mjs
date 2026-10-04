@@ -59,6 +59,42 @@ const checks = {
     assert.deepEqual(p.ownSize, ['portrait', 'landscape']);
     assert.deepEqual([p.stillDrawn, p.closed], [true, true]);
   },
+  'a new song opens on the Write tab': () => {
+    const w = report.writing;
+    assert.deepEqual([w.dialog, w.tab, w.name], ['New song', 'Write', 'Morning Song']);
+    assert.ok(w.blankPage.includes('Morning Song') && w.blankPage.includes('Verse 1') && w.blankPage.includes('Chorus'), String(w.blankPage));
+  },
+  'typed words and [chords] are laid out on the page': () => {
+    const w = report.writing;
+    for (const text of ['Morning light is on the hills', 'Every shadow fades', 'Lift it up, let it ring']) assert.ok(w.pageAfterTyping.includes(text), text);
+    assert.deepEqual(w.chordPieces, ['G', 'C', 'Em', 'D', 'C', 'G']);
+    assert.deepEqual(w.sectionsOnPage, ['Verse 1', 'Chorus']);
+  },
+  'syllable counts and the key\'s chords are shown': () => {
+    const w = report.writing;
+    assert.deepEqual(w.syllables, ['', '7', '5', '', '', '6']);
+    assert.deepEqual(w.palette, ['G1', 'Am2m', 'Bm3m', 'C4', 'D5', 'Em6m', 'F#dim7°']);
+    assert.equal(w.inserted, true);
+  },
+  'chord diagrams are added for the chords used': () => assert.deepEqual(report.writing.diagrams, ['G', 'C', 'Em', 'D']),
+  'drafts are kept and restored; transposing rewrites the text': () => {
+    const w = report.writing;
+    assert.deepEqual(w.draftSaved, ['Draft 1']);
+    assert.deepEqual(w.transposed, ['[A]Morning light is [D]on the hills', 'A']);
+    assert.deepEqual(w.restored.slice(0, 2), ['[G]Morning light is [C]on the hills', 'G']);
+    assert.deepEqual(w.restored[2], ['Before restoring', 'Draft 1']);
+  },
+  'the structure list reorders the song': () => {
+    const w = report.writing;
+    assert.deepEqual(w.structure, ['Verse 1', 'Chorus']);
+    assert.equal(w.reordered, 'Chorus / Chorus,Verse 1');
+  },
+  'a written song survives saving and reopening': () => {
+    const w = report.writing;
+    assert.equal(w.savedAs, 'Morning Song');
+    assert.deepEqual(w.reopened, { write: true, sameText: true, title: 'Morning Song', drafts: 2, diagrams: 'guitar', tab: 'Write', diagramPieces: 4 });
+    assert.equal(w.unnamed, 0);
+  },
   'recovery saves, loads and clears': () => assert.deepEqual(report.recovery, { name: 'x', baseVersion: 'abc', cleared: true }),
   'CSP header is served': () => assert.match(report.csp || '', /default-src 'none'/),
   'eval is blocked': () => assert.equal(report.evalBlocked, true),

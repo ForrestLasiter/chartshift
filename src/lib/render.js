@@ -1,4 +1,5 @@
 import { fontCss, LINE_HEIGHT } from './text.js';
+import { drawDiagram } from './diagrams.js';
 
 // Keep in step with the tokens in styles.css (--accent, --verse, --chorus…).
 const SELECT_FILL = 'rgba(36, 86, 214, 0.16)';
@@ -44,6 +45,7 @@ export function boundsOf(rects) {
 }
 
 function drawPiece(ctx, p, atlases) {
+  if (p.kind === 'diagram') return drawDiagram(ctx, p);
   if (p.kind === 'text') {
     ctx.font = fontCss(p);
     ctx.fillStyle = p.color;
@@ -88,7 +90,7 @@ export function drawPage(ctx, page, atlases, view) {
       if (!inSection.has(piece.section)) inSection.set(piece.section, []);
       inSection.get(piece.section).push(r);
     }
-    if (showChords && piece.chord) chordRects.push(r);
+    if (showChords && piece.chord && piece.kind !== 'diagram') chordRects.push(r);
   }
   // Pieces being dragged in from another page are shown where they would land.
   if (incoming) {
