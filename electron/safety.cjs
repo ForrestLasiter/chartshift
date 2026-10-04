@@ -27,11 +27,22 @@ const CONTENT_SECURITY_POLICY = [
   "img-src 'self' data: blob:",
   "font-src 'self' data: blob:",
   "connect-src 'self' data: blob:",
+  "media-src 'self' blob:",
   "object-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
   "frame-ancestors 'none'",
 ].join('; ');
+
+/**
+ * The only permission the app ever grants: the microphone (sound only, never
+ * the camera), and only to the app's own page. Used for recording an
+ * instrument to work out its chords.
+ */
+function allowPermission({ permission, mediaTypes, url }, dev = false) {
+  if (permission !== 'media' || !isTrustedUrl(url, dev)) return false;
+  return Array.isArray(mediaTypes) && mediaTypes.length > 0 && mediaTypes.every((type) => type === 'audio');
+}
 
 /** True when `target` is `root` itself or somewhere beneath it. */
 function isInside(root, target, pathLib = nodePath) {
@@ -78,6 +89,7 @@ const LIMITS = {
   printPages: 500,
   printImageBytes: 80 * MB,
   exportBytes: 1024 * MB,     // a PDF or ChordPro file being saved
+  audioBytes: 200 * MB,       // a recording chosen for chord detection
 };
 
 // Names come from the renderer or from zip files; never let one escape the library folder.
@@ -206,7 +218,7 @@ ${css}
 
 module.exports = {
   APP_ORIGIN, DEV_ORIGIN, CONTENT_SECURITY_POLICY, LIMITS, SONG_EXT, SETLIST_EXT,
-  isTrustedUrl, isInside, resolveAppPath, createSerialQueue,
+  isTrustedUrl, allowPermission, isInside, resolveAppPath, createSerialQueue,
   safeName, parseSetlist, planZipImport, decideWrite, copyName,
   checkPrintPages, buildPrintHtml,
 };

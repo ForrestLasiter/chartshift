@@ -122,6 +122,19 @@ handle('file:open', async () => {
   return { name: path.basename(filePath), data: await fs.readFile(filePath) };
 });
 
+handle('audio:open', async () => {
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Choose a recording',
+    defaultPath: app.getPath('music'),
+    properties: ['openFile'],
+    filters: [{ name: 'Audio', extensions: ['wav', 'mp3', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'flac', 'webm', 'wma'] }],
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  const filePath = result.filePaths[0];
+  if ((await fs.stat(filePath)).size > safety.LIMITS.audioBytes) throw new Error('That recording is too large (over 200 MB).');
+  return { name: path.basename(filePath), data: await fs.readFile(filePath) };
+});
+
 // Files that leave the library (PDFs, ChordPro) always go through a Save dialog.
 handle('file:save', async (_e, { kind, suggestedName, data }) => {
   const options = SAVE_KINDS[kind];
@@ -182,9 +195,14 @@ app.whenReady().then(() => {
     headers.set('X-Content-Type-Options', 'nosniff');
     return new Response(response.body, { status: response.status, headers });
   });
-  // The app asks for no camera, microphone, location or similar; refuse them all.
-  session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  session.defaultSession.setPermissionCheckHandler(() => false);
+  // Everything is refused except the microphone (sound only) for the app's own
+  // page, which "Chords from a recording" needs. No camera, location or the rest.
+  session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+    callback(!!win && contents === win.webContents
+      && safety.allowPermission({ permission, mediaTypes: details.mediaTypes, url: details.requestingUrl }, DEV));
+  });
+  session.defaultSession.setPermissionCheckHandler((contents, permission, origin, details) => !!win && contents === win.webContents
+    && safety.allowPermission({ permission, mediaTypes: [details.mediaType], url: origin }, DEV));
   if (!DEV) Menu.setApplicationMenu(null);
   createWindow();
 });

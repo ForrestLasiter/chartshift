@@ -4,6 +4,7 @@ const call = (channel) => (...args) => ipcRenderer.invoke(channel, ...args);
 
 contextBridge.exposeInMainWorld('chartshift', {
   openFile: call('file:open'),
+  openAudio: call('audio:open'),
   saveFile: call('file:save'),
   print: call('print'),
   setDirty: (dirty) => ipcRenderer.send('dirty', dirty),

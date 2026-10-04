@@ -53,6 +53,26 @@ You can still drag things on the page of a written song, but the page is laid ou
 
 A chart opened from a PDF can be turned into a written song with **Turn this chart into editable text** on its Write tab, once its text has been read. This makes a new song from the recognised words and chord positions and leaves the chart as it was.
 
+## Chords from a recording (experimental)
+
+This feature is marked **Experimental** in the app: it is new, and so far has only been tested on computer-generated strumming.
+
+**Chords from a recording…** (More menu, Write tab, or the welcome screen) listens to an instrument and writes down the chords it hears.
+
+- Record with the microphone, or choose an audio file (WAV, MP3, M4A, OGG, FLAC…; up to 15 minutes).
+- The result shows each chord with the time it starts. Play the recording back and the current chord is highlighted; choose a chord to hear that part.
+- The chords are also given as song text, a few to a line, which you can correct before using. Then add them to the end of the song you are writing, or start a new song with them (its key is filled in).
+
+What to expect: it is a first draft, not a transcription.
+
+- It works best with one guitar or piano playing chords clearly, with no singing and little background noise.
+- It recognises plain major and minor chords. Sevenths and sus chords are written as the chord they are built on.
+- It copes with an instrument tuned a little sharp or flat, and reports roughly how far.
+- It does not hear words or individual notes, and it does not know where bars begin.
+- So far it has only been tested on computer-generated strumming, not on real recordings.
+
+Nothing is sent anywhere: the sound is analysed on the PC and is not kept after the window closes. The microphone is the only device ChartShift ever asks for, and only for this; the camera and everything else stay refused.
+
 ## When two PCs change a song
 
 If the library folder is shared through OneDrive, Google Drive, Dropbox or similar, two people can edit the same song.
@@ -107,6 +127,7 @@ Saving as PDF always keeps each page's own size.
 - `src/lib/textlayer.js`, `src/lib/ocr.js` – match recognised words (PDF text or Tesseract OCR) to pieces and mark chords.
 - `src/lib/chords.js`, `src/lib/chordpro.js`, `src/lib/layout.js` – chord maths, ChordPro, fit/enlarge.
 - `src/editor/` – `store.js` (pages, selection, tools, undo), `sections.js`, `music.js`, `writing.js` (written songs: text in, pages out).
+- `src/lib/audioChords.js` (chords from sound: note strengths per moment, matched to chord patterns, smoothed over time), `src/lib/audioInput.js` (decoding and microphone), `src/ListenDialog.jsx`.
 - `src/lib/songtext.js` (song text: structure, syllables, transposing), `src/lib/diagrams.js` (chord shapes, each checked by a test against the notes it should sound), `src/WriteTab.jsx`.
 - `src/App.jsx` (shell: title bar, editing toolbar, welcome screen), `src/PageView.jsx` (one page), `src/Inspector.jsx` (Sections / Chords / Page tabs), `src/dialogs.jsx`, `src/ui.jsx` (shared controls), `src/icons.jsx`, `src/styles.css` (design tokens) – the UI.
 - `src/lib/exporter.js` – flattens pages at 300 dpi into a PDF (pdf-lib) or into images for printing.

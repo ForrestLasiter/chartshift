@@ -86,7 +86,7 @@ function Drafts({ editor, write }) {
   );
 }
 
-export function WriteTab({ editor, state, onConvert }) {
+export function WriteTab({ editor, state, onConvert, onListen }) {
   const write = state.write;
   const area = useRef(null);
   const gutter = useRef(null);
@@ -160,6 +160,7 @@ export function WriteTab({ editor, state, onConvert }) {
         <p className="muted">
           {here != null ? `Line ${caretLine + 1}: about ${here} syllable${here === 1 ? '' : 's'}.` : 'The numbers beside each line are a rough syllable count.'}
         </p>
+        <button type="button" className="btn outline block" onClick={onListen}><Icon name="mic" />Chords from a recording… <span className="badge">Experimental</span></button>
         <label className="field">Add a section
           <select value="" onChange={(e) => addSection(e.target.value)}>
             <option value="">Choose…</option>

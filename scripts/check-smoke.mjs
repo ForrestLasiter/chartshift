@@ -95,6 +95,26 @@ const checks = {
     assert.deepEqual(w.reopened, { write: true, sameText: true, title: 'Morning Song', drafts: 2, diagrams: 'guitar', tab: 'Write', diagramPieces: 4 });
     assert.equal(w.unnamed, 0);
   },
+  'chords are read from a recording and shown for checking': () => {
+    const l = report.listening;
+    assert.equal(l.error, null);
+    assert.equal(l.title, 'Chords from a recording');
+    assert.deepEqual(l.chips, ['G', 'C', 'D', 'Em', 'C', 'G']);
+    assert.deepEqual(l.times.map((t) => t.split(':')[1]).map(Number).map((sec, i) => Math.abs(sec - i * 2) <= 1), [true, true, true, true, true, true]);
+    assert.match(l.summary, /6 chord changes in 0:1[12] · key looks like G/);
+    assert.equal(l.text, '[G] [C] [D] [Em]\n[C] [G]');
+    assert.deepEqual([l.hasPlayer, l.startUnnamed, l.resultUnnamed], [true, 0, 0]);
+  },
+  'heard chords go into the song': () => {
+    const l = report.listening;
+    assert.deepEqual([l.canAppend, l.appended, l.closed], [true, true, true]);
+    assert.deepEqual(l.onPage, ['G', 'C', 'D', 'Em', 'C', 'G']);
+  },
+  'the camera is refused; the microphone is not blocked by the app': () => {
+    assert.notEqual(report.listening.camera, 'granted');
+    // On a PC with no microphone this is NotFoundError; it must not be a refusal by the app itself.
+    assert.ok(['granted', 'NotFoundError', 'NotReadableError'].includes(report.listening.microphone), report.listening.microphone);
+  },
   'recovery saves, loads and clears': () => assert.deepEqual(report.recovery, { name: 'x', baseVersion: 'abc', cleared: true }),
   'CSP header is served': () => assert.match(report.csp || '', /default-src 'none'/),
   'eval is blocked': () => assert.equal(report.evalBlocked, true),

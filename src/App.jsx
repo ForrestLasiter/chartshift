@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createEditor, useEditorState, LEVELS } from './editor/store.js';
 import { PageView } from './PageView.jsx';
 import { Inspector } from './Inspector.jsx';
+import { ListenDialog } from './ListenDialog.jsx';
 import { Icon, Logo } from './icons.jsx';
 import { IconButton, Menu, Segmented } from './ui.jsx';
 import { ChordReviewDialog, ConflictDialog, LibraryDialog, NameDialog, NewSongDialog, PrintPreviewDialog } from './dialogs.jsx';
@@ -251,6 +252,25 @@ export function App() {
       'Made a typed copy of the chart. Check the words and chord positions; the original chart was not changed.');
   }, [editor, startWritten, confirmDiscard]);
 
+  // Chords heard in a recording go into a written song: this one, or a new one.
+  const useHeardChords = useCallback((text, heard, where) => {
+    setDialog(null);
+    const st = editor.getState();
+    if (where === 'append' && st.write) {
+      editor.setWrite({ text: `${st.write.text.replace(/\s+$/, '')}${st.write.text.trim() ? '\n\n' : ''}${text}\n` }, `Added ${heard.chords.length} chords from the recording. Check them against what was played.`);
+      setInspectorOpen(true);
+      setInspectorTab('write');
+      return;
+    }
+    if (!confirmDiscard()) return;
+    startWritten(newWrite({ key: heard.key ? keyName(heard.key) : '' }, `${text}\n`), 'Untitled song',
+      `New song with ${heard.chords.length} chords from the recording. Check them against what was played, then add the words.`);
+  }, [editor, startWritten, confirmDiscard]);
+
+  // The smoke test hands in a recording directly instead of using the file dialog.
+  const pickAudio = useCallback(async () => (window.__testAudio && new URLSearchParams(location.search).has('debug')
+    ? { name: 'test.wav', data: window.__testAudio } : platform.openAudio()), []);
+
   // OCR every page that still has unread pieces, then let the user check the chords.
   const readText = useCallback(() => run('Reading text…', async (progress) => {
     const { recognise } = await import('./lib/ocr.js');
@@ -459,6 +479,7 @@ export function App() {
           <button type="button" className="btn" onClick={print} disabled={!hasDoc} title="Print preview and print (Ctrl+P)" aria-label="Print"><Icon name="print" /><span className="optional">Print</span></button>
           <Menu label="More file actions" items={[
             { label: 'Save under a new name…', icon: 'save', shortcut: 'Ctrl+Shift+S', disabled: !hasDoc, onSelect: () => saveSong(true) },
+            { label: 'Chords from a recording… (experimental)', icon: 'mic', onSelect: () => setDialog('listen') },
             { label: 'Export as ChordPro (.cho)', icon: 'music', disabled: !hasDoc, onSelect: saveChordPro },
             { label: 'Open the sample chart', icon: 'page', onSelect: openSample },
           ]} />
@@ -531,6 +552,7 @@ export function App() {
                 <button type="button" className="btn primary large" onClick={open}><Icon name="folder" />Open a PDF or image…</button>
                 <button type="button" className="btn outline large" onClick={() => setDialog('newSong')}><Icon name="edit" />Write a new song</button>
                 <button type="button" className="btn outline large" onClick={() => setDialog('library')}><Icon name="library" />Song library</button>
+                <button type="button" className="btn outline large" onClick={() => setDialog('listen')}><Icon name="mic" />Chords from a recording <span className="badge">Experimental</span></button>
               </div>
               <h2>Recent songs</h2>
               {recent.length ? (
@@ -552,7 +574,7 @@ export function App() {
         </main>
         {hasDoc && inspectorOpen && (
           <Inspector editor={editor} state={state} tab={inspectorTab} onTab={setInspectorTab}
-            onReadText={readText} onReview={() => setDialog('review')} onPdf={savePdf} onPrint={print} onChordPro={saveChordPro} onConvert={convertToText} />
+            onReadText={readText} onReview={() => setDialog('review')} onPdf={savePdf} onPrint={print} onChordPro={saveChordPro} onConvert={convertToText} onListen={() => setDialog('listen')} />
         )}
       </div>
 
@@ -567,6 +589,9 @@ export function App() {
           onSetlistPdf={(s) => { setDialog(null); setlistPdf(s); }}
           onSetlistPrint={(s) => { setDialog(null); setlistPrint(s); }}
           notify={(status) => editor.set({ status })} />
+      )}
+      {dialogType === 'listen' && (
+        <ListenDialog pickFile={pickAudio} canAppend={!!state.write} onUse={useHeardChords} onClose={() => setDialog(null)} />
       )}
       {dialogType === 'newSong' && <NewSongDialog onCreate={newSong} onClose={() => setDialog(null)} />}
       {dialogType === 'review' && <ChordReviewDialog editor={editor} onClose={() => setDialog(null)} />}

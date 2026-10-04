@@ -202,13 +202,13 @@ function PageTools({ editor, onPdf, onPrint, onChordPro }) {
   );
 }
 
-export function Inspector({ editor, state, tab, onTab, onReadText, onReview, onPdf, onPrint, onChordPro, onConvert }) {
+export function Inspector({ editor, state, tab, onTab, onReadText, onReview, onPdf, onPrint, onChordPro, onConvert, onListen }) {
   return (
     <aside className={`inspector${tab === 'write' && state.write ? ' wide' : ''}`} aria-label="Song tools">
       <h2 className="sr-only">Song tools</h2>
       <Tabs label="Song tools" tabs={TABS} value={tab} onChange={onTab} prefix={PREFIX} />
       <TabPanel prefix={PREFIX} id={tab} className="inspector-body">
-        {tab === 'write' && <WriteTab editor={editor} state={state} onConvert={onConvert} />}
+        {tab === 'write' && <WriteTab editor={editor} state={state} onConvert={onConvert} onListen={onListen} />}
         {tab === 'sections' && (state.write ? <StructureList editor={editor} state={state} /> : <Sections editor={editor} state={state} />)}
         {tab === 'chords' && <Chords editor={editor} state={state} onReadText={onReadText} onReview={onReview} />}
         {tab === 'page' && <PageTools editor={editor} onPdf={onPdf} onPrint={onPrint} onChordPro={onChordPro} />}

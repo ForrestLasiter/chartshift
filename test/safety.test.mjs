@@ -366,3 +366,25 @@ test('sheets are described in words for captions and screen readers', () => {
   const [landscape] = planPrint([wide], { mode: 'own' });
   assert.equal(describeSheet(wide, landscape), '11 × 8.5 in landscape');
 });
+
+// --- microphone permission ---------------------------------------------------------------
+
+test('only the microphone, only for the app page, is ever allowed', () => {
+  const app = 'app://chartshift/index.html';
+  assert.equal(safety.allowPermission({ permission: 'media', mediaTypes: ['audio'], url: app }), true);
+  assert.equal(safety.allowPermission({ permission: 'media', mediaTypes: ['audio'], url: 'app://chartshift' }), true);
+  for (const request of [
+    { permission: 'media', mediaTypes: ['video'], url: app },
+    { permission: 'media', mediaTypes: ['audio', 'video'], url: app },
+    { permission: 'media', mediaTypes: [], url: app },
+    { permission: 'media', mediaTypes: undefined, url: app },
+    { permission: 'media', mediaTypes: ['audio'], url: 'https://example.com/' },
+    { permission: 'media', mediaTypes: ['audio'], url: 'http://localhost:5183/' },
+    { permission: 'geolocation', mediaTypes: ['audio'], url: app },
+    { permission: 'notifications', url: app },
+    { permission: 'clipboard-read', url: app },
+    { permission: 'display-capture', mediaTypes: ['audio'], url: app },
+  ]) assert.equal(safety.allowPermission(request), false, JSON.stringify(request));
+  assert.equal(safety.allowPermission({ permission: 'media', mediaTypes: ['audio'], url: 'http://localhost:5183/' }, true), true, 'the dev server is trusted only in development');
+  assert.match(safety.CONTENT_SECURITY_POLICY, /media-src 'self' blob:/);
+});

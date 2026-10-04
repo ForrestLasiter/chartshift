@@ -21,6 +21,22 @@ export async function openFile() {
   });
 }
 
+/** Lets the user choose a recording. Resolves { name, data } or null. */
+export async function openAudio() {
+  if (api) return api.openAudio();
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'audio/*';
+    input.onchange = async () => {
+      const file = input.files[0];
+      resolve(file ? { name: file.name, data: new Uint8Array(await file.arrayBuffer()) } : null);
+    };
+    input.oncancel = () => resolve(null);
+    input.click();
+  });
+}
+
 /** Saves a file that leaves the library. kind: 'pdf' | 'cho'. */
 export async function saveFile({ kind, suggestedName, data }) {
   if (api) return api.saveFile({ kind, suggestedName, data });

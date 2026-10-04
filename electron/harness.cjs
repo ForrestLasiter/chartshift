@@ -21,6 +21,33 @@ async function capture(win) {
   }
 }
 
+// Page-side code that builds a short WAV of strummed chords (G C D Em C G), for exercising
+// "Chords from a recording" without a microphone.
+const SYNTH_WAV = `(() => {
+        const rate = 22050, voicings = { G: [43, 47, 50, 55, 59, 67], C: [48, 52, 55, 60, 64], D: [50, 57, 62, 66], Em: [40, 47, 52, 55, 59, 64] };
+        const song = ['G', 'C', 'D', 'Em', 'C', 'G'], each = 2 * rate;
+        const pcm = new Int16Array(song.length * each);
+        song.forEach((name, n) => {
+          for (const [k, midi] of voicings[name].entries()) {
+            const hz = 440 * 2 ** ((midi - 69) / 12);
+            for (let i = 0; i < each; i++) {
+              const t = i / rate, since = (t % 0.5) - k * 0.012;
+              if (since < 0) continue;
+              let v = 0;
+              for (let h = 1; h <= 5; h++) v += 0.6 ** (h - 1) * Math.sin(2 * Math.PI * hz * h * t);
+              pcm[n * each + i] += 2200 * Math.exp(-since * 3) * v;
+            }
+          }
+        });
+        const bytes = new Uint8Array(44 + pcm.length * 2), view = new DataView(bytes.buffer);
+        const tag = (at, text) => [...text].forEach((ch, i) => view.setUint8(at + i, ch.charCodeAt(0)));
+        tag(0, 'RIFF'); view.setUint32(4, 36 + pcm.length * 2, true); tag(8, 'WAVEfmt '); view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true);
+        view.setUint16(32, 2, true); view.setUint16(34, 16, true); tag(36, 'data'); view.setUint32(40, pcm.length * 2, true);
+        new Int16Array(bytes.buffer, 44).set(pcm);
+        return bytes;
+      })()`;
+
 function whenSampleOpens(win, run) {
   const fail = setTimeout(() => { console.error('HARNESS FAIL: sample did not open'); app.exit(1); }, 60000);
   let started = false;
@@ -258,6 +285,34 @@ function runSmoke(win, { output, withPrintWindow, preload }) {
       w.unnamed = [...document.querySelectorAll('button')].filter((el) => !named(el)).length + [...document.querySelectorAll('input, select, textarea')].filter((el) => !labelled(el)).length;
       await window.chartshift.library.remove('Morning Song').catch(() => {});
       out.writing = w;
+
+      // Chords from a recording: a synthesised strummed G C D Em as a WAV file.
+      const wav = ${SYNTH_WAV};
+      window.__testAudio = wav;
+      const l = {};
+      more.click(); await sleep(150);
+      [...document.querySelectorAll('[role=menuitem]')].find((x) => x.textContent.includes('Chords from a recording')).click(); await sleep(300);
+      l.title = document.querySelector('dialog[open] h2').textContent;
+      l.startUnnamed = [...document.querySelectorAll('dialog[open] button')].filter((el) => !named(el)).length;
+      press('Choose an audio file…', document.querySelector('dialog[open]'));
+      for (let i = 0; i < 100 && !document.querySelector('.chord-timeline, dialog[open] .error'); i++) await sleep(200);
+      l.error = document.querySelector('dialog[open] .error')?.textContent || null;
+      l.chips = [...document.querySelectorAll('.chord-chip strong')].map((x) => x.textContent);
+      l.times = [...document.querySelectorAll('.chord-chip span')].map((x) => x.textContent);
+      l.summary = document.querySelector('dialog[open] .fact')?.textContent;
+      l.text = document.querySelector('.listen-text')?.value;
+      l.hasPlayer = !!document.querySelector('dialog[open] audio[src^="blob:"]');
+      l.resultUnnamed = [...document.querySelectorAll('dialog[open] button')].filter((el) => !named(el)).length + [...document.querySelectorAll('dialog[open] select, dialog[open] textarea')].filter((el) => !labelled(el)).length;
+      l.canAppend = !![...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Add to the end of this song');
+      press('Add to the end of this song', document.querySelector('dialog[open]')); await sleep(300);
+      l.appended = S().write.text.trimEnd().endsWith('[G] [C] [D] [Em]\\n[C] [G]');
+      l.onPage = S().pages.flatMap((pg) => pg.pieces.filter((q) => q.chord && q.kind === 'text').map((q) => q.text)).slice(-6);
+      l.closed = !document.querySelector('dialog[open]');
+      // Microphone: only sound, only for this page; the camera stays refused.
+      const ask = async (constraints) => { try { const stream = await navigator.mediaDevices.getUserMedia(constraints); stream.getTracks().forEach((t) => t.stop()); return 'granted'; } catch (e) { return e.name; } };
+      l.camera = await ask({ video: true });
+      l.microphone = await ask({ audio: true });
+      out.listening = l;
       return out;
     } catch (error) { return { pageError: String(error && error.stack || error) }; } })()`);
     if (report.pageError) throw new Error('in-page checks failed: ' + report.pageError);
@@ -404,6 +459,17 @@ const SCENES = [
   ['17-back-to-sample', `
     document.querySelector('.inspector [role=tab]').click();
     await __h.sleep(100);`],
+  ['18-listen-start', `
+    await __h.press('More file actions');
+    [...document.querySelectorAll('[role=menuitem]')].find((x) => x.textContent.includes('Chords from a recording')).click();
+    await __h.sleep(300);`],
+  ['19-listen-result', `
+    window.__testAudio = ${SYNTH_WAV};
+    await __h.press('Choose an audio file…', document.querySelector('dialog[open]'));
+    for (let i = 0; i < 100 && !document.querySelector('.chord-timeline'); i++) await __h.sleep(200);
+    const audio = document.querySelector('dialog[open] audio');
+    audio.currentTime = 4.5;
+    await __h.sleep(400);`],
 ];
 
 function runShots(win, { folder }) {
