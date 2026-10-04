@@ -13,7 +13,15 @@ npm start          # production build in Electron
 npm run dist:win   # installer -> release/ChartShift Setup <version>.exe
 ```
 
-To install from a clone rather than just run it: `npm install`, then `npm run dist:win`, then run the installer it writes to `release\` (in PowerShell: `& ".elease\ChartShift Setup <version>.exe"`). Needs Node.js 20 or newer.
+To install from a clone rather than just run it, in PowerShell:
+
+```powershell
+npm install
+npm run dist:win
+& ".\release\ChartShift Setup 0.4.0.exe"   # use the version number it built
+```
+
+Needs Node.js 20 or newer.
 
 Other scripts: `npm test` (unit tests), `npm run shots` (captures screenshots of the main screens at several window sizes and scaling levels into `screenshots/`), `npm run smoke` (drives the real app in Electron against throwaway folders and checks library conflicts, recovery, the content security policy, navigation/IPC lock-down, keyboard and focus behaviour, mixed-size printing and OCR; `node scripts/check-smoke.mjs release/win-unpacked/ChartShift.exe` runs the same checks on a packaged build), `npm run sample` (regenerates `public/sample.pdf`), `npm run web` (editor in a browser, for development).
 
