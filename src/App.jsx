@@ -3,6 +3,7 @@ import { createEditor, useEditorState, LEVELS } from './editor/store.js';
 import { PageView } from './PageView.jsx';
 import { Inspector } from './Inspector.jsx';
 import { ListenDialog } from './ListenDialog.jsx';
+import { UpdateDialog } from './UpdateDialog.jsx';
 import { Icon, Logo } from './icons.jsx';
 import { IconButton, Menu, Segmented } from './ui.jsx';
 import { ChordReviewDialog, ConflictDialog, LibraryDialog, NameDialog, NewSongDialog, PrintPreviewDialog } from './dialogs.jsx';
@@ -501,6 +502,7 @@ export function App() {
             { label: 'Chords from a recording… (experimental)', icon: 'mic', onSelect: () => setDialog('listen') },
             { label: 'Export as ChordPro (.cho)', icon: 'music', disabled: !hasDoc, onSelect: saveChordPro },
             { label: 'Open the sample chart', icon: 'page', onSelect: openSample },
+            { label: 'Check for updates…', icon: 'update', onSelect: () => setDialog('update') },
           ]} />
         </div>
       </header>
@@ -612,6 +614,7 @@ export function App() {
       {dialogType === 'listen' && (
         <ListenDialog pickFile={pickAudio} canAppend={!!state.write} onUse={useHeardChords} onClose={() => setDialog(null)} />
       )}
+      {dialogType === 'update' && <UpdateDialog unsaved={state.dirty} onClose={() => setDialog(null)} />}
       {dialogType === 'newSong' && <NewSongDialog onCreate={newSong} onClose={() => setDialog(null)} />}
       {dialogType === 'review' && <ChordReviewDialog editor={editor} onClose={() => setDialog(null)} />}
       {dialogType === 'saveName' && (

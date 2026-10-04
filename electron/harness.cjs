@@ -347,6 +347,23 @@ function runSmoke(win, { output, withPrintWindow, preload }) {
       l.camera = await ask({ video: true });
       l.microphone = await ask({ audio: true });
       out.listening = l;
+
+      // Updates: the real check against GitHub (this needs the internet), and the window for it.
+      const u = {};
+      try {
+        const latest = await window.chartshift.update.check();
+        u.check = { latest: latest.latest || latest.version, current: latest.current, available: latest.available, name: latest.name, size: latest.size, hidesUrl: !('url' in latest) && !('sha256' in latest) };
+      } catch (error) { u.check = { offline: String(error.message) }; }
+      u.downloadRefusedWhenCurrent = await window.chartshift.update.download().then(() => 'downloaded', (e) => e.message);
+      u.installRefusedWithoutDownload = await window.chartshift.update.install().then(() => 'started', (e) => e.message);
+      more.click(); await sleep(150);
+      [...document.querySelectorAll('[role=menuitem]')].find((x) => x.textContent.includes('Check for updates')).click();
+      for (let i = 0; i < 60 && !document.querySelector('dialog[open] .update-result'); i++) await sleep(250);
+      u.title = document.querySelector('dialog[open] h2')?.textContent;
+      u.shown = document.querySelector('dialog[open] .update-result')?.textContent;
+      u.unnamed = [...document.querySelectorAll('dialog[open] button')].filter((el) => !named(el)).length;
+      document.querySelector('dialog[open]')?.dispatchEvent(new Event('cancel', { cancelable: true })); await sleep(300);
+      out.updates = u;
       return out;
     } catch (error) { return { pageError: String(error && error.stack || error) }; } })()`);
     if (report.pageError) throw new Error('in-page checks failed: ' + report.pageError);

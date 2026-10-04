@@ -125,3 +125,6 @@ function memoryLibrary() {
 export const library = api?.library ?? memoryLibrary();
 
 export const recovery = api?.recovery ?? { save: async () => {}, load: async () => null, clear: async () => {} };
+
+/** Checking for and installing updates; null where that is not possible (the browser preview). */
+export const update = api?.update ?? null;

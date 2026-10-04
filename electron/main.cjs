@@ -5,6 +5,8 @@ const fs = require('fs/promises');
 const { pathToFileURL } = require('url');
 const library = require('./library.cjs');
 const safety = require('./safety.cjs');
+const update = require('./update.cjs');
+const { spawn } = require('child_process');
 
 const DEV = !!process.env.CHARTSHIFT_DEV;
 // Test runs (see harness.cjs): smoke checks, or screenshots of the main screens.
@@ -26,6 +28,7 @@ const SAVE_KINDS = {
 };
 let win = null;
 let dirty = false;
+let quittingToUpdate = false;
 
 if (TESTING) {
   const scratch = require('fs').mkdtempSync(path.join(os.tmpdir(), 'chartshift-smoke-'));
@@ -89,7 +92,7 @@ function createWindow() {
     else harness.runShots(win, { folder: SHOTS });
   }
   win.on('close', (event) => {
-    if (!dirty || TESTING) return;
+    if (!dirty || TESTING || quittingToUpdate) return;
     const choice = dialog.showMessageBoxSync(win, {
       type: 'warning',
       buttons: ['Keep editing', 'Close without saving'],
@@ -151,6 +154,41 @@ handle('file:save', async (_e, { kind, suggestedName, data }) => {
 });
 
 library.register(() => win, handle);
+
+// Updates: ask GitHub for the latest release, download its installer, start it.
+// The page only ever names the step; what is downloaded and what is run are
+// decided here, from GitHub's answer (see update.cjs).
+let latestInstaller = null;
+let downloadedInstaller = null;
+handle('update:check', async () => {
+  latestInstaller = await update.checkLatest(net.fetch, app.getVersion());
+  const { url, sha256, ...shown } = latestInstaller;
+  return { ...shown, canInstall: app.isPackaged };
+});
+handle('update:download', async () => {
+  if (!latestInstaller || !latestInstaller.available) throw new Error('There is no update to download.');
+  let last = 0;
+  const result = await update.downloadInstaller(latestInstaller, path.join(app.getPath('temp'), 'ChartShift-update'), {
+    fetchImpl: net.fetch,
+    onProgress: (received, total) => {
+      const now = Date.now();
+      if (now - last < 150 && received < total) return;
+      last = now;
+      if (win && !win.isDestroyed()) win.webContents.send('update:progress', { received, total });
+    },
+  });
+  downloadedInstaller = result.path;
+  return { verified: result.verified };
+});
+handle('update:install', async () => {
+  if (!downloadedInstaller) throw new Error('The update has not been downloaded yet.');
+  if (!app.isPackaged) throw new Error('This copy is running from source, so it cannot install an update over itself. Use git pull instead.');
+  // Start the installer on its own, then close so it can replace the app's files.
+  spawn(downloadedInstaller, [], { detached: true, stdio: 'ignore' }).unref();
+  quittingToUpdate = true;
+  setTimeout(() => app.quit(), 400);
+  return true;
+});
 
 // Printing: lay the page images out in a hidden window and hand it to the
 // normal Windows print dialog, so any installed printer works. Sheets may

@@ -130,6 +130,22 @@ const checks = {
     // On a PC with no microphone this is NotFoundError; it must not be a refusal by the app itself.
     assert.ok(['granted', 'NotFoundError', 'NotReadableError'].includes(report.listening.microphone), report.listening.microphone);
   },
+  'checking for updates asks GitHub and reports the result': () => {
+    const u = report.updates;
+    assert.equal(u.title, 'Check for updates');
+    assert.equal(u.unnamed, 0);
+    if (u.check.offline) { console.log('       (no internet: update check answered "' + u.check.offline + '")'); assert.match(u.shown, /GitHub|internet/); return; }
+    assert.match(u.check.latest, /^\d+\.\d+\.\d+$/);
+    assert.match(u.check.name, /^ChartShift-Setup-\d+\.\d+\.\d+\.exe$/);
+    assert.equal(typeof u.check.available, 'boolean');
+    assert.equal(u.check.hidesUrl, true);
+    assert.match(u.shown, u.check.available ? /is available/ : /up to date/);
+  },
+  'nothing is downloaded or run without an update to install': () => {
+    const u = report.updates;
+    if (!u.check.offline && u.check.available === false) assert.match(u.downloadRefusedWhenCurrent, /no update to download/);
+    assert.match(u.installRefusedWithoutDownload, /not been downloaded/);
+  },
   'recovery saves, loads and clears': () => assert.deepEqual(report.recovery, { name: 'x', baseVersion: 'abc', cleared: true }),
   'CSP header is served': () => assert.match(report.csp || '', /default-src 'none'/),
   'eval is blocked': () => assert.equal(report.evalBlocked, true),

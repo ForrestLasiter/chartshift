@@ -1,6 +1,6 @@
 {
   "name": "chartshift",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "ChartShift - rearrange chord charts, tabs and sheet music PDFs: move lines, words and letters, add text, then save or print.",
   "main": "electron/main.cjs",
   "type": "module",

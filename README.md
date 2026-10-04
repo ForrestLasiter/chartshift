@@ -74,6 +74,15 @@ What to expect: it is a first draft, not a transcription.
 
 Nothing is sent anywhere: the sound is analysed on the PC and is not kept after the window closes. The microphone is the only device ChartShift ever asks for, and only for this; the camera and everything else stay refused.
 
+## Updating
+
+**Check for updates…** (More menu) asks GitHub for the latest release. If there is a newer one it shows what is in it, downloads the installer, checks it, and then closes ChartShift and starts the installer. Songs in the library are kept.
+
+- Nothing is checked in the background: it only contacts github.com when you ask, and sends nothing about you or your songs.
+- The installer is only accepted from this project's own releases, and the download must match the size and SHA-256 digest GitHub lists for it; anything else is thrown away.
+- The installer is not code-signed, so Windows still shows its "unknown publisher" warning.
+- A copy run from source (`npm start`) can check and download, but will not install over itself; use `git pull`.
+
 ## When two PCs change a song
 
 If the library folder is shared through OneDrive, Google Drive, Dropbox or similar, two people can edit the same song.
@@ -134,6 +143,7 @@ Saving as PDF always keeps each page's own size.
 - `src/lib/exporter.js` – flattens pages at 300 dpi into a PDF (pdf-lib) or into images for printing.
 - `src/lib/project.js` – `.chartshift` song files (a zip of `song.json` + sprite sheets), so songs stay editable.
 - `electron/main.cjs`, `electron/library.cjs` – window, dialogs, printing, the library folder, crash recovery.
+- `electron/update.cjs` – finding, downloading and checking an update from GitHub releases.
 - `electron/songStore.cjs` – the file operations behind saving, conflict copies, folder moves and imports. `electron/harness.cjs` – the smoke and screenshot runs.
 - `electron/safety.cjs`, `src/lib/songSchema.js`, `src/lib/recoveryQueue.js`, `src/lib/printPlan.js` – the safety rules: trusted origins, path containment, file limits and validation, save-conflict decisions, autosave ordering, print sheet planning. All pure and unit-tested.
 

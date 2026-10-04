@@ -24,6 +24,17 @@ contextBridge.exposeInMainWorld('chartshift', {
     importAll: call('library:import'),
     setFolder: call('library:setFolder'),
   },
+  update: {
+    check: call('update:check'),
+    download: call('update:download'),
+    install: call('update:install'),
+    // Calls back with { received, total } while the installer downloads; returns a function that stops listening.
+    onProgress: (listener) => {
+      const wrapped = (_event, progress) => listener(progress);
+      ipcRenderer.on('update:progress', wrapped);
+      return () => ipcRenderer.removeListener('update:progress', wrapped);
+    },
+  },
   recovery: {
     save: call('recovery:save'),
     load: call('recovery:load'),
