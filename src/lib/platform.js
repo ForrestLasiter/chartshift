@@ -128,3 +128,6 @@ export const recovery = api?.recovery ?? { save: async () => {}, load: async () 
 
 /** Checking for and installing updates; null where that is not possible (the browser preview). */
 export const update = api?.update ?? null;
+
+/** The app's own preferences. In the browser preview they are not kept. */
+export const settings = api?.settings ?? { get: async () => ({ checkUpdatesAtStartup: false }), set: async (patch) => ({ checkUpdatesAtStartup: false, ...patch }) };

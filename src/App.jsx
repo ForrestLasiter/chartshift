@@ -58,6 +58,7 @@ export function App() {
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [inspectorTab, setInspectorTab] = useState('sections');
   const [recent, setRecent] = useState([]);
+  const [newVersion, setNewVersion] = useState(null); // a newer release found by the start-up check
   const { pages, selection, zoom, busy } = state;
   const hasDoc = !!pages;
 
@@ -363,6 +364,24 @@ export function App() {
 
   useEffect(() => { platform.setDirty(state.dirty); }, [state.dirty]);
 
+  // If asked to, look for a newer release once, shortly after starting. It only
+  // tells: nothing is downloaded until the user chooses to. Being offline, or
+  // GitHub being unreachable, is not worth a message.
+  useEffect(() => {
+    if (!platform.update) return undefined;
+    const timer = setTimeout(async () => {
+      try {
+        if (!(await platform.settings.get()).checkUpdatesAtStartup) return;
+        const latest = await platform.update.check();
+        if (latest.available) {
+          setNewVersion(latest.version);
+          editor.set({ status: `ChartShift ${latest.version} is available. Choose “Update available” at the top to see what is new.` });
+        }
+      } catch { /* try again next time the app starts */ }
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [editor]);
+
   // The welcome screen lists the most recently saved songs.
   useEffect(() => {
     if (hasDoc) return;
@@ -490,6 +509,11 @@ export function App() {
             </>
           )}
         </div>
+        {newVersion && (
+          <button type="button" className="btn update-note" onClick={() => setDialog('update')} title={`ChartShift ${newVersion} is available`}>
+            <Icon name="update" />Update available
+          </button>
+        )}
         <div className="file-actions" role="toolbar" aria-label="File">
           <button type="button" className="btn" onClick={() => { if (confirmDiscard()) setDialog('newSong'); }} title="Write a new song from a blank page (Ctrl+N)"><Icon name="plus" />New</button>
           <button type="button" className="btn" onClick={open} title="Open a PDF, image, ChordPro file or song (Ctrl+O)"><Icon name="folder" />Open</button>
@@ -614,7 +638,9 @@ export function App() {
       {dialogType === 'listen' && (
         <ListenDialog pickFile={pickAudio} canAppend={!!state.write} onUse={useHeardChords} onClose={() => setDialog(null)} />
       )}
-      {dialogType === 'update' && <UpdateDialog unsaved={state.dirty} onClose={() => setDialog(null)} />}
+      {dialogType === 'update' && (
+        <UpdateDialog unsaved={state.dirty} onClose={() => setDialog(null)} onChecked={(latest) => setNewVersion(latest.available ? latest.version : null)} />
+      )}
       {dialogType === 'newSong' && <NewSongDialog onCreate={newSong} onClose={() => setDialog(null)} />}
       {dialogType === 'review' && <ChordReviewDialog editor={editor} onClose={() => setDialog(null)} />}
       {dialogType === 'saveName' && (

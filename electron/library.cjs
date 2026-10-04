@@ -19,6 +19,12 @@ function readSettings() {
   try { return JSON.parse(readFileSync(settingsPath(), 'utf8')); } catch { return {}; }
 }
 
+// Saves one or more settings, leaving the others as they are.
+function writeSettings(patch) {
+  mkdirSync(path.dirname(settingsPath()), { recursive: true });
+  writeFileSync(settingsPath(), JSON.stringify({ ...readSettings(), ...patch }, null, 2));
+}
+
 function libraryDir() {
   // CHARTSHIFT_LIBRARY points tests at a throwaway folder.
   const dir = process.env.CHARTSHIFT_LIBRARY || readSettings().libraryDir || path.join(app.getPath('documents'), FOLDER);
@@ -218,7 +224,7 @@ function register(getWindow, handle) {
     // file with different contents is never skipped or overwritten: both are
     // kept (see songStore.mergeInto). The previous folder is left untouched.
     const merged = await store.migrateLibrary(previous, target);
-    writeFileSync(settingsPath(), JSON.stringify({ ...readSettings(), libraryDir: target }, null, 2));
+    writeSettings({ libraryDir: target });
     return { ...info(), ...merged, previous };
   });
 
@@ -227,4 +233,4 @@ function register(getWindow, handle) {
   handle('recovery:clear', clearRecovery);
 }
 
-module.exports = { register, libraryDir, clearRecovery };
+module.exports = { register, libraryDir, clearRecovery, readSettings, writeSettings };

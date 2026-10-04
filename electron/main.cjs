@@ -88,7 +88,7 @@ function createWindow() {
   if (TESTING) {
     const harness = require('./harness.cjs');
     const preload = path.join(__dirname, 'preload.cjs');
-    if (SMOKE) harness.runSmoke(win, { output: SMOKE, withPrintWindow, preload });
+    if (SMOKE) harness.runSmoke(win, { output: SMOKE, withPrintWindow, preload, pretendVersion: (version) => { pretendVersion = version; } });
     else harness.runShots(win, { folder: SHOTS });
   }
   win.on('close', (event) => {
@@ -160,11 +160,20 @@ library.register(() => win, handle);
 // decided here, from GitHub's answer (see update.cjs).
 let latestInstaller = null;
 let downloadedInstaller = null;
+// Test runs can pretend to be an old version, to see an update being offered.
+let pretendVersion = null;
 handle('update:check', async () => {
-  latestInstaller = await update.checkLatest(net.fetch, app.getVersion());
+  latestInstaller = await update.checkLatest(net.fetch, (TESTING && pretendVersion) || app.getVersion());
   const { url, sha256, ...shown } = latestInstaller;
   return { ...shown, canInstall: app.isPackaged };
 });
+// The app's own preferences. Only known settings are read or written.
+handle('settings:get', () => ({ checkUpdatesAtStartup: library.readSettings().checkUpdatesAtStartup === true }));
+handle('settings:set', (_e, patch) => {
+  if (patch && typeof patch.checkUpdatesAtStartup === 'boolean') library.writeSettings({ checkUpdatesAtStartup: patch.checkUpdatesAtStartup });
+  return { checkUpdatesAtStartup: library.readSettings().checkUpdatesAtStartup === true };
+});
+
 handle('update:download', async () => {
   if (!latestInstaller || !latestInstaller.available) throw new Error('There is no update to download.');
   let last = 0;

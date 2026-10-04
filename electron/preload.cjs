@@ -24,6 +24,10 @@ contextBridge.exposeInMainWorld('chartshift', {
     importAll: call('library:import'),
     setFolder: call('library:setFolder'),
   },
+  settings: {
+    get: call('settings:get'),
+    set: call('settings:set'),
+  },
   update: {
     check: call('update:check'),
     download: call('update:download'),

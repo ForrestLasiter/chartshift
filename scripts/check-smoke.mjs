@@ -146,6 +146,20 @@ const checks = {
     if (!u.check.offline && u.check.available === false) assert.match(u.downloadRefusedWhenCurrent, /no update to download/);
     assert.match(u.installRefusedWithoutDownload, /not been downloaded/);
   },
+  'the start-up check is off by default and the setting is remembered': () => {
+    const u = report.updates;
+    assert.deepEqual([u.settingDefault, u.settingOn, u.settingOff, u.noteWhenOff], [false, true, false, false]);
+    assert.equal(u.settingIgnoresJunk, '{"checkUpdatesAtStartup":true}', 'only the known setting is accepted, and only as true or false');
+  },
+  'with the setting on, a newer version is announced at start-up': () => {
+    const st = report.startup;
+    assert.equal(st.quietWhenOff, true, 'nothing is checked or shown while the setting is off');
+    if (report.updates.check.offline) { console.log('       (no internet: start-up check not exercised)'); return; }
+    assert.equal(st.note, 'Update available');
+    assert.match(st.status, /^ChartShift \d+\.\d+\.\d+ is available/);
+    assert.match(st.dialog, /is available\. You have 0\.0\.1/);
+    assert.deepEqual([st.checkbox, st.offersDownload], [true, true]);
+  },
   'recovery saves, loads and clears': () => assert.deepEqual(report.recovery, { name: 'x', baseVersion: 'abc', cleared: true }),
   'CSP header is served': () => assert.match(report.csp || '', /default-src 'none'/),
   'eval is blocked': () => assert.equal(report.evalBlocked, true),

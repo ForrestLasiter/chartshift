@@ -66,7 +66,7 @@ function whenSampleOpens(win, run) {
   });
 }
 
-function runSmoke(win, { output, withPrintWindow, preload }) {
+function runSmoke(win, { output, withPrintWindow, preload, pretendVersion }) {
   whenSampleOpens(win, async () => {
     await fs.writeFile(output, await capture(win));
     const page = (code) => win.webContents.executeJavaScript(code);
@@ -363,6 +363,12 @@ function runSmoke(win, { output, withPrintWindow, preload }) {
       u.shown = document.querySelector('dialog[open] .update-result')?.textContent;
       u.unnamed = [...document.querySelectorAll('dialog[open] button')].filter((el) => !named(el)).length;
       document.querySelector('dialog[open]')?.dispatchEvent(new Event('cancel', { cancelable: true })); await sleep(300);
+      // The start-up setting is off unless switched on, and is remembered.
+      u.settingDefault = (await window.chartshift.settings.get()).checkUpdatesAtStartup;
+      u.settingOn = (await window.chartshift.settings.set({ checkUpdatesAtStartup: true })).checkUpdatesAtStartup;
+      u.settingIgnoresJunk = JSON.stringify(await window.chartshift.settings.set({ checkUpdatesAtStartup: 'yes', libraryDir: 'C:/somewhere/else' }));
+      u.settingOff = (await window.chartshift.settings.set({ checkUpdatesAtStartup: false })).checkUpdatesAtStartup;
+      u.noteWhenOff = !!document.querySelector('.update-note');
       out.updates = u;
       return out;
     } catch (error) { return { pageError: String(error && error.stack || error) }; } })()`);
@@ -383,6 +389,39 @@ function runSmoke(win, { output, withPrintWindow, preload }) {
     const sheets = [[8.5, 11], [11, 8.5], [5.833, 8.264], [8.5, 11]].map(([widthIn, heightIn]) => ({ png: DOT_PNG, widthIn, heightIn }));
     const pdf = await withPrintWindow(sheets, (printWin) => printWin.webContents.printToPDF({ preferCSSPageSize: true, printBackground: true }));
     report.mixedPrint = [...pdf.toString('latin1').matchAll(/\/MediaBox\s*\[\s*([\d.\s-]+)\]/g)].map((m) => m[1].trim().split(/\s+/).slice(2).map((n) => Math.round(Number(n))).join('x'));
+
+    // Checking at start-up: with the setting on and an older version pretended,
+    // the app says an update is available soon after it opens; and with the
+    // setting off it stays quiet.
+    const restart = async () => {
+      const opened = new Promise((resolve) => win.webContents.once('did-finish-load', resolve));
+      await win.loadURL('app://chartshift/index.html?debug');
+      await opened;
+    };
+    const noteAppears = async (ms) => {
+      for (const until = Date.now() + ms; Date.now() < until;) {
+        await sleep(300);
+        const text = await page(`document.querySelector('.update-note')?.textContent || ''`);
+        if (text) return text;
+      }
+      return '';
+    };
+    pretendVersion('0.0.1');
+    await restart();
+    report.startup = { quietWhenOff: (await noteAppears(5000)) === '' };
+    await page(`window.chartshift.settings.set({ checkUpdatesAtStartup: true })`);
+    await restart();
+    report.startup.note = await noteAppears(15000);
+    report.startup.status = await page(`document.querySelector('[role=status]').textContent`);
+    if (report.startup.note) {
+      await page(`document.querySelector('.update-note').click()`);
+      for (let i = 0; i < 40 && !(await page(`!!document.querySelector('dialog[open] .update-result')`)); i++) await sleep(250);
+      report.startup.dialog = await page(`document.querySelector('dialog[open] .update-result')?.textContent || ''`);
+      report.startup.checkbox = await page(`document.querySelector('dialog[open] input[type=checkbox]').checked`);
+      report.startup.offersDownload = await page(`[...document.querySelectorAll('dialog[open] button')].some((b) => /^Download version/.test(b.textContent))`);
+    }
+    pretendVersion(null);
+    await page(`window.chartshift.settings.set({ checkUpdatesAtStartup: false })`);
 
     // OCR must still work under the content security policy.
     if (process.env.CHARTSHIFT_SMOKE_OCR) {

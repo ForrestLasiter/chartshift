@@ -3,15 +3,21 @@
 import { useEffect, useState } from 'react';
 import { Modal } from './dialogs.jsx';
 import { Icon } from './icons.jsx';
-import { update } from './lib/platform.js';
+import { settings, update } from './lib/platform.js';
 
 const megabytes = (bytes) => `${Math.round(bytes / 1048576)} MB`;
 
-export function UpdateDialog({ unsaved, onClose }) {
+export function UpdateDialog({ unsaved, onClose, onChecked }) {
   const [phase, setPhase] = useState('checking'); // checking | current | available | downloading | ready | starting | error
   const [info, setInfo] = useState(null);
   const [error, setError] = useState('');
   const [progress, setProgress] = useState({ received: 0, total: 0 });
+  const [atStartup, setAtStartup] = useState(false);
+  useEffect(() => { settings.get().then((s) => setAtStartup(s.checkUpdatesAtStartup)).catch(() => {}); }, []);
+  const toggleStartup = async (on) => {
+    setAtStartup(on);
+    try { setAtStartup((await settings.set({ checkUpdatesAtStartup: on })).checkUpdatesAtStartup); } catch { setAtStartup(!on); }
+  };
 
   const check = async () => {
     setPhase('checking');
@@ -20,6 +26,7 @@ export function UpdateDialog({ unsaved, onClose }) {
     try {
       const latest = await update.check();
       setInfo(latest);
+      onChecked?.(latest);
       setPhase(latest.available ? 'available' : 'current');
     } catch (err) {
       setError(err.message.replace(/^Error invoking remote method '[^']+': Error: /, ''));
@@ -93,6 +100,10 @@ export function UpdateDialog({ unsaved, onClose }) {
 
         {phase === 'error' && <p className="error update-result" role="alert">{error}</p>}
 
+        <label className="check">
+          <input type="checkbox" checked={atStartup} onChange={(e) => toggleStartup(e.target.checked)} />
+          <span>Check for updates when ChartShift starts<br /><span className="muted">It asks github.com once each time the app opens and tells you if there is a newer version. It never downloads or installs anything by itself.</span></span>
+        </label>
         <p className="muted">Checking contacts github.com, where ChartShift’s releases are published. Nothing about you or your songs is sent.</p>
       </div>
     </Modal>

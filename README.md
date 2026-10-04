@@ -78,7 +78,8 @@ Nothing is sent anywhere: the sound is analysed on the PC and is not kept after 
 
 **Check for updates…** (More menu) asks GitHub for the latest release. If there is a newer one it shows what is in it, downloads the installer, checks it, and then closes ChartShift and starts the installer. Songs in the library are kept.
 
-- Nothing is checked in the background: it only contacts github.com when you ask, and sends nothing about you or your songs.
+- By default nothing is checked in the background: it only contacts github.com when you ask, and sends nothing about you or your songs.
+- **Check for updates when ChartShift starts** (a tick box in that window, off unless you turn it on) asks GitHub once each time the app opens. If there is a newer version, an **Update available** button appears at the top. It never downloads or installs by itself, and stays silent when offline.
 - The installer is only accepted from this project's own releases, and the download must match the size and SHA-256 digest GitHub lists for it; anything else is thrown away.
 - The installer is not code-signed, so Windows still shows its "unknown publisher" warning.
 - A copy run from source (`npm start`) can check and download, but will not install over itself; use `git pull`.
