@@ -99,6 +99,7 @@ function cleanWrite(write) {
     meta: cleanMeta(write.meta),
     text: write.text,
     diagrams: write.diagrams === 'guitar' || write.diagrams === 'ukulele' ? write.diagrams : null,
+    columns: write.columns === 2 ? 2 : 1,
     drafts: drafts.filter((d) => d && typeof d.text === 'string' && d.text.length <= LIMITS.songText).map((d) => ({
       name: (str(d.name, 80) || 'Draft'), saved: str(d.saved, 40) || '', text: d.text, meta: cleanMeta(d.meta),
     })),

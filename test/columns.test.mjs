@@ -2,8 +2,9 @@
 // sections must be found per column, not across the whole page.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyTokens, chordTokens, isReadable, unreadWords } from '../src/lib/textlayer.js';
+import { applyTokens, chordTokens, isReadable, needsReading, rescanChords, unreadWords } from '../src/lib/textlayer.js';
 import { createEditor } from '../src/editor/store.js';
+import { exportChordPro } from '../src/lib/chordpro.js';
 
 // Monospace layout: 6pt per character at 10pt type.
 const CHAR = 6, SIZE = 10;
@@ -148,4 +149,158 @@ test('scan chords are marked across both columns, with misreads corrected', () =
   assert.deepEqual(pieces.filter((p) => p.chord).map((p) => p.chord), ['C', 'G', 'C', 'D', 'Em', 'G']);
   assert.ok(pieces.filter((p) => p.chord).every((p) => p.t === p.chord), 'the stored text is the corrected chord');
   assert.ok(pieces.filter((p) => !p.chord).every((p) => p.t && !/^[CDG]$/.test(p.t)));
+});
+
+// --- turning a two-column chart into editable text ----------------------------------------
+
+// A page of recognised words laid out like an Ultimate Guitar chart: 6pt characters, 12pt rows.
+function chartPage(rowsLeft, rowsRight, { marked = false } = {}) {
+  const pieces = [];
+  let id = 1, group = 1;
+  const add = (x, y, line, size = 10) => {
+    for (const m of line.matchAll(/\S+/g)) {
+      pieces.push({ id: id++, kind: 'clip', x: x + m.index * CHAR, y: y - size * 0.7, w: m[0].length * CHAR, h: size * 0.7,
+        atlas: 0, sx: 1, sy: 1, sw: 10, sh: 10, word: group++, line: group++, block: group++, t: m[0], tok: group++,
+        ...(marked && /^(C|G|D|Em)$/.test(m[0]) && !/[a-z]{2}/.test(line.replace(/Em/g, '')) ? { chord: m[0] } : null) });
+    }
+  };
+  add(60, 40, 'Way Maker Chords', 22);
+  rowsLeft.forEach((line, i) => add(60, 80 + i * 12, line));
+  rowsRight.forEach((line, i) => add(330, 86 + i * 12, line));   // the right column sits half a row lower
+  return { id: 1, w: 612, h: 792, pieces, sections: [] };
+}
+const LEFT = ['[Verse 1]', '        C                   G', 'You are here, moving in our midst', '          D                Em', 'I worship You    I worship You', '', '', '[Chorus]', 'C', 'Way maker, miracle worker'];
+const RIGHT = ['[Verse 2]', '        C                    G', 'You are here, touching every heart', '          D               Em', 'I worship You   I worship You', '', '', '[Bridge]', 'Cc', '  Even when I do not see it'];
+
+test('a two-column chart becomes text one column at a time, chords folded into the lyrics', () => {
+  const text = exportChordPro([chartPage(LEFT, RIGHT)], 'fallback');
+  assert.equal(text, [
+    '{title: Way Maker Chords}', '',
+    '{comment: Verse 1}', 'You are [C]here, moving in our [G]midst', 'I worship [D]You I worship [Em]You', '',
+    '{comment: Chorus}', '[C]Way maker, miracle worker', '',
+    '{comment: Verse 2}', 'You are [C]here, touching every [G]heart', 'I worship [D]You I worship [Em]You', '',
+    '{comment: Bridge}', '[C]Even when I do not see it', '',
+  ].join('\n'));
+  assert.ok(!/midst .*touching/.test(text), 'the second column is not spliced into the first');
+});
+
+test('the result is the same whether or not the chords had been marked beforehand', () => {
+  assert.equal(exportChordPro([chartPage(LEFT, RIGHT, { marked: true })], 'x'), exportChordPro([chartPage(LEFT, RIGHT)], 'x'));
+});
+
+test('a chord a character off its word is tidied; one in the middle of a word is kept', () => {
+  // D sits one character into "You,", Em over the last letter of "worship", G in the middle of a word.
+  const page = chartPage(['           D           Em', 'I worship You, I worship You', '    G', 'Hallelujah'], []);
+  const text = exportChordPro([page], 'x');
+  assert.ok(text.includes('I worship [D]You, I worship [Em]You'), text);
+  assert.ok(text.includes('Hall[G]elujah'), text);
+});
+
+test('pages with no recognised text give nothing', () => {
+  const blank = chartPage([], []);
+  blank.pieces.forEach((p) => { delete p.t; delete p.tok; });
+  assert.equal(exportChordPro([blank], 'x'), null);
+});
+
+test('chord rows stacked above a wrapped line are paired with the lyric lines in order', () => {
+  // As Ultimate Guitar prints a long line: its chords wrap onto two rows, then its words onto two lines.
+  const page = chartPage(['[Chorus]', '           C', '   G', '(You are)  Way maker, miracle', 'worker, promise keeper', '                       D', '             Em', 'Light in the darkness,  my God that', ' is who You are'], []);
+  const text = exportChordPro([page], 'x');
+  assert.equal(text, ['{title: Way Maker Chords}', '', '{comment: Chorus}',
+    '(You are) [C]Way maker, miracle', 'wor[G]ker, promise keeper', 'Light in the darkness, [D]my God that', 'is who You [Em]are', ''].join('\n'));
+});
+
+test('chord rows with no lyric line beneath stay as rows of chords', () => {
+  const page = chartPage(['[Intro]', 'G     C     D', 'Em    C', '', '', '[Verse 1]', '        C', 'You are here'], []);
+  assert.equal(exportChordPro([page], 'x'), ['{title: Way Maker Chords}', '', '{comment: Intro}', '[G] [C] [D]', '[Em] [C]', '', '{comment: Verse 1}', 'You are [C]here', ''].join('\n'));
+});
+
+test('a chord at the foot of a column is joined to its lyric at the top of the next', () => {
+  // Left column ends on a chord row; the words it belongs to start the right column.
+  const page = chartPage(
+    ['[Verse 1]', '        C', 'You are here', '          D', 'I worship You', '        C'],
+    ['You are here, mending every heart', '          D', 'I worship You'],
+  );
+  const text = exportChordPro([page], 'x');
+  assert.ok(text.includes('You are [C]here\nI worship [D]You\nYou are [C]here, mending every heart\nI worship [D]You'), text);
+  assert.ok(!/^\[C\]$/m.test(text), 'no chord is left stranded on a line of its own');
+});
+
+test('a last page with only a few lines in its second column is still read in columns', () => {
+  const full = chartPage(
+    Array.from({ length: 20 }, (_, i) => (i % 2 ? 'You are here, moving in our midst' : '        C                   G')),
+    Array.from({ length: 20 }, (_, i) => (i % 2 ? 'I worship You, I worship You' : '          D              Em')),
+  );
+  // The last page: a full left column, and three short rows at the top right, at the same heights as left-hand chords.
+  const last = chartPage(
+    Array.from({ length: 20 }, (_, i) => (i % 2 ? 'That is who You are' : '                D')),
+    ['That is who You are', '                G', 'That is who You are'],
+  );
+  last.id = 2;
+  last.pieces = last.pieces.filter((p) => p.y > 60).map((p) => ({ ...p, id: p.id + 5000, word: p.word + 5000, tok: p.tok + 5000 }));
+  const text = exportChordPro([full, last], 'x');
+  assert.ok(!/D That is who You are|You are That/.test(text), 'left-hand chords are not run together with right-hand words');
+  assert.equal(text.match(/That is who You \[D\]are/g).length, 10);
+  assert.ok(text.trimEnd().endsWith('That is who You are\nThat is who You [G]are'), text.slice(-120));
+});
+
+test('page numbers in the margin are left out of the text', () => {
+  const page = chartPage(['[Outro]', '                C', 'That is who You are', '                G'], []);
+  const base = page.pieces.length + 1;
+  // "Page 1/3" at the foot of the page, and the next page starting with the words for that last chord.
+  'Page 1/3'.split(' ').forEach((word, i) => page.pieces.push({ id: base + i, kind: 'clip', x: 500 + i * 30, y: 770, w: 24, h: 7,
+    atlas: 0, sx: 1, sy: 1, sw: 10, sh: 10, word: 9000 + i, line: 9100, block: 9200, t: word, tok: 9300 + i }));
+  const second = chartPage(['That is who You are'], []);
+  second.id = 2;
+  second.pieces = second.pieces.filter((p) => p.y > 60).map((p) => ({ ...p, id: p.id + 7000, word: p.word + 7000, tok: p.tok + 7000 }));
+  const text = exportChordPro([page, second], 'x');
+  assert.ok(!/Page/.test(text), text);
+  assert.ok(text.trimEnd().endsWith('That is who You [C]are\nThat is who You [G]are'), text);
+});
+
+// --- rescanning a chart for chords -------------------------------------------------------
+
+const marked = (page) => [...new Map(page.pieces.filter((p) => p.chord).map((p) => [p.tok, p.chord])).values()];
+
+test('a rescan finds the chords an older version missed, in both columns', () => {
+  const page = chartPage(LEFT, RIGHT);            // text is read, but nothing is marked as a chord
+  assert.deepEqual(marked(page), []);
+  const result = rescanChords([page]);
+  assert.deepEqual(marked(page).sort(), ['C', 'C', 'C', 'C', 'D', 'D', 'Em', 'Em', 'G', 'G']);
+  assert.deepEqual(result, { found: 10, added: 10, corrected: 0, removed: 0 });
+  assert.ok(page.pieces.filter((p) => p.t === 'C' && p.chord === 'C').length >= 1, 'the misread "Cc" is now C');
+  assert.ok(!page.pieces.some((p) => p.t === 'Cc'));
+  assert.ok(page.pieces.filter((p) => /^(You|are|here,|worship|\[Verse|maker,)$/.test(p.t)).every((p) => !p.chord), 'words and headings are not marked');
+});
+
+test('a rescan keeps what was already right, corrects misreads, and drops marks that are not chords', () => {
+  const page = chartPage(LEFT, RIGHT);
+  const set = (text, chord) => page.pieces.filter((p) => p.t === text).forEach((p) => { p.chord = chord; });
+  set('G', 'G');                 // already found
+  set('[Chorus]', '[Chorus]');   // a heading an older version marked by mistake
+  set('Cc', 'Cc');               // a misread that was marked as it stood
+  const hand = page.pieces.find((p) => p.t === 'midst');
+  hand.chord = 'Am'; hand.t = 'Am';   // a chord the user marked by hand, sitting among lyrics
+  const result = rescanChords([page]);
+  assert.equal(result.removed, 1);
+  assert.equal(result.corrected, 1);
+  assert.ok(!page.pieces.some((p) => p.chord === '[Chorus]' || p.chord === 'Cc'));
+  assert.equal(hand.chord, 'Am', 'a hand-made mark is kept');
+  const again = rescanChords([page]);
+  assert.deepEqual([again.added, again.corrected, again.removed], [0, 0, 0], 'a second rescan changes nothing');
+});
+
+test('only pages with text still to read are read again', () => {
+  const read = chartPage(LEFT, RIGHT);
+  assert.equal(needsReading(read.pieces), false);
+  // A staff or a rule has no text and never will: it does not make a page "unread".
+  read.pieces.push({ id: 99999, kind: 'clip', x: 60, y: 600, w: 400, h: 60, word: 99999, line: 99999, block: 99999 });
+  assert.equal(needsReading(read.pieces), false);
+  const scan = chartPage(LEFT, RIGHT);
+  scan.pieces.forEach((p) => { delete p.t; delete p.tok; });
+  assert.equal(needsReading(scan.pieces), true);
+  const gaps = chartPage(LEFT, RIGHT);
+  gaps.pieces.filter((p) => p.t === 'C' || p.t === 'G').forEach((p) => { delete p.t; delete p.tok; });
+  assert.equal(needsReading(gaps.pieces), true, 'several words the PDF gave no text for');
+  assert.equal(needsReading([]), false);
 });

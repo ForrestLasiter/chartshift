@@ -200,8 +200,9 @@ function dilated(mask, W, H, radius) {
 // Finds the empty vertical strips between columns of text. A strip counts
 // when almost nothing crosses it (a title running across the page is allowed),
 // it is clearly wider than a word space, and there is real content on both
-// sides. Returns the x position of the middle of each strip.
-function findGutters(items, pageWidth, hm) {
+// sides (at least `minShare` of the items each). Returns the x position of
+// the middle of each strip.
+export function findGutters(items, pageWidth, hm, minShare = 0.15) {
   if (items.length < 12) return [];
   const diff = new Float64Array(pageWidth + 2);
   for (const c of items) { diff[c.x0] += c.h; diff[c.x1 + 1] -= c.h; }
@@ -225,7 +226,7 @@ function findGutters(items, pageWidth, hm) {
         const middle = (start + x) / 2;
         let left = 0, right = 0;
         for (const c of items) { if ((c.x0 + c.x1) / 2 < middle) left++; else right++; }
-        if (left >= items.length * 0.15 && right >= items.length * 0.15) gutters.push(middle);
+        if (left >= items.length * minShare && right >= items.length * minShare) gutters.push(middle);
       }
       start = -1;
     }

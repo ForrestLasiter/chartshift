@@ -1,7 +1,7 @@
 // Songwriting: song text, structure, chords in a key, syllables, chord diagrams.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chordsInKey, noteIndex, parseChord, parseKey } from '../src/lib/chords.js';
+import { chordsInKey, keyFromNames, noteIndex, parseChord, parseKey } from '../src/lib/chords.js';
 import { parseChordPro } from '../src/lib/chordpro.js';
 import {
   chordsUsed, deleteSection, duplicateSection, headingOf, joinChordPro, lineSyllables, mapChords, moveSection,
@@ -145,4 +145,14 @@ test('diagram lookups cope with the ways chords are written', () => {
   assert.deepEqual(shapeFor('C', 'ukulele').frets, [0, 0, 0, 3]);
   assert.deepEqual(shapeFor('Bb', 'ukulele').frets, [3, 2, 1, 1]);
   assert.equal(shapeFor('Ebm', 'guitar').baseFret, 6);
+});
+
+test('a song\'s key is judged from all its chords, not its first one', () => {
+  // Way Maker starts on C but is in G.
+  assert.deepEqual(keyFromNames(['C', 'G', 'D', 'Em', 'C', 'G', 'D', 'Em']), { index: 7, minor: false });
+  assert.deepEqual(keyFromNames(['G', 'C', 'G', 'D', 'G']), { index: 7, minor: false });
+  assert.deepEqual(keyFromNames(['Am', 'F', 'C', 'G', 'Am']), { index: 9, minor: true });
+  assert.deepEqual(keyFromNames(['D/F#', 'G', 'A7', 'Bm', 'D']), { index: 2, minor: false });
+  assert.equal(keyFromNames([]), null);
+  assert.equal(keyFromNames(['hello', '?']), null);
 });

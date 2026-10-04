@@ -2,8 +2,8 @@
 // marking chords by hand, fit-to-one-page and large print.
 import { boundsOf } from '../lib/render.js';
 import { FONTS, baselineOffset, measureText, sizeForCapHeight } from '../lib/text.js';
-import { isChord, keyName, keyOf, noteName, parseChord, prefersFlats, toNashville, transposeChord } from '../lib/chords.js';
-import { applyTokens } from '../lib/textlayer.js';
+import { isChord, keyFromNames, keyName, noteName, parseChord, prefersFlats, toNashville, transposeChord } from '../lib/chords.js';
+import { applyTokens, rescanChords } from '../lib/textlayer.js';
 import { enlarge, fitToOnePage } from '../lib/layout.js';
 
 const FAMILY = {
@@ -62,14 +62,10 @@ export function installMusic(ed) {
     return list.sort((a, b) => a.pageIndex - b.pageIndex || (Math.abs(a.y - b.y) > 5 ? a.y - b.y : a.x - b.x));
   };
 
-  /** The song's key, guessed from its first chord. */
+  /** The song's key, judged from all of its chords (not just the first, which is often not the home chord). */
   ed.songKey = () => {
     if (state().write) return ed.writtenKey();
-    for (const chord of ed.chordList()) {
-      const key = keyOf(chord.text);
-      if (key) return key;
-    }
-    return null;
+    return keyFromNames(ed.chordList().map((chord) => chord.text));
   };
 
   // Replaces a chord's original letters with a text box in a matching font,
@@ -267,6 +263,17 @@ export function installMusic(ed) {
     // Part of the same "read text" step: no separate undo entry.
     ed.set({ pages });
     return results.size;
+  };
+
+  /**
+   * Looks through the recognised text again for chords and updates which
+   * words are marked. Returns what changed; one Undo puts the marks back.
+   */
+  ed.rescanChords = () => {
+    const pages = state().pages.map((page) => ({ ...page, pieces: page.pieces.map((p) => ({ ...p })) }));
+    const result = rescanChords(pages);
+    if (result.added || result.corrected || result.removed) ed.commit(pages, {});
+    return result;
   };
 
   ed.fitOnePage = () => {

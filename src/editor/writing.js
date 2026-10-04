@@ -4,7 +4,8 @@
 //   { meta: { title, artist, key, tempo, time, capo }, text, diagrams, drafts }
 import { layoutChordPro, parseChordPro } from '../lib/chordpro.js';
 import { EMPTY_META, mapChords, transposeText } from '../lib/songtext.js';
-import { keyName, keyOf, noteName, parseKey, prefersFlats, toNashville } from '../lib/chords.js';
+import { keyFromNames, keyName, noteName, parseKey, prefersFlats, toNashville } from '../lib/chords.js';
+import { chordsUsedAll } from '../lib/songtext.js';
 
 const MAX_DRAFTS = 30;
 
@@ -16,12 +17,12 @@ export function layoutWritten(write, ids, pageIds = []) {
     title: meta.title, subtitle: meta.artist, key: meta.key, time: meta.time, capo: meta.capo,
     tempo: meta.tempo ? `${meta.tempo} bpm` : '',
   });
-  const pages = layoutChordPro(song, ids, { diagrams: write.diagrams || null });
+  const pages = layoutChordPro(song, ids, { diagrams: write.diagrams || null, columns: write.columns === 2 ? 2 : 1 });
   pages.forEach((page, i) => { if (pageIds[i] != null) page.id = pageIds[i]; });
   return pages;
 }
 
-export const newWrite = (meta = {}, text = '') => ({ meta: { ...EMPTY_META, ...meta }, text, diagrams: null, drafts: [] });
+export const newWrite = (meta = {}, text = '') => ({ meta: { ...EMPTY_META, ...meta }, text, diagrams: null, columns: 1, drafts: [] });
 
 export function installWriting(ed) {
   const state = () => ed.getState();
@@ -51,8 +52,7 @@ export function installWriting(ed) {
     if (!write) return null;
     const fromFacts = parseKey(write.meta.key);
     if (fromFacts) return fromFacts;
-    const first = write.text.match(/\[([A-G][^\]\n]*)\]/);
-    return first ? keyOf(first[1]) : null;
+    return keyFromNames(chordsUsedAll(write.text));
   };
 
   ed.transposeWritten = (semitones, spelling = 'auto') => {

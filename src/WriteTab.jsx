@@ -170,6 +170,13 @@ export function WriteTab({ editor, state, onConvert, onListen }) {
       </div>
 
       <div className="group">
+        <h3>Page</h3>
+        <label className="field">Columns
+          <select value={write.columns === 2 ? '2' : '1'} onChange={(e) => editor.setWrite({ columns: Number(e.target.value) })}>
+            <option value="1">One column</option>
+            <option value="2">Two columns (fits about twice as much on a page)</option>
+          </select>
+        </label>
         <label className="field">Chord diagrams at the top of the song
           <select value={write.diagrams || ''} onChange={(e) => editor.setWrite({ diagrams: e.target.value || null })}>
             <option value="">None</option>

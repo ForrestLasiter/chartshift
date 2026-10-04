@@ -61,6 +61,16 @@ export function mapChords(text, fn) {
 
 export const transposeText = (text, semitones, useFlats) => mapChords(text, (chord) => transposeChord(chord, semitones, useFlats));
 
+/** Every chord of a song, in order, repeats included. */
+export function chordsUsedAll(text) {
+  const all = [];
+  for (const line of text.split('\n')) {
+    if (headingOf(line)) continue;
+    for (const match of line.matchAll(/\[([^\]\n]+)\]/g)) if (isChord(match[1])) all.push(match[1]);
+  }
+  return all;
+}
+
 /** The distinct chords of a song, in the order they first appear. */
 export function chordsUsed(text) {
   const seen = new Set();

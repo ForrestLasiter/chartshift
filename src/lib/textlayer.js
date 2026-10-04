@@ -5,6 +5,7 @@
 // Each matched piece gets `t` (its word), `tok` (an id shared by the word's
 // pieces) and, for chords, `chord`.
 import { isChord, isChordLine, isNeutral } from './chords.js';
+import { guttersOfPages, inColumns, rowsOf } from './rows.js';
 
 // OCR often stumbles on lone chord letters ("Cc" for C, "Ern" for Em).
 export function repairChord(text) {
@@ -140,11 +141,11 @@ export function applyTokens(pieces, rows, ids, { uncertain = false, onlyUnread =
  */
 export const isReadable = (text) => !/[\u0000-\u001f\u007f-\u009f\ue000-\uf8ff\ufffd\ufff0-\uffff]/.test(text);
 
-/** How many words on a page have no text behind them (ignoring specks and staff contents). */
+/** How many words on a page have no text behind them (ignoring specks, rules, staffs and their contents). */
 export function unreadWords(pieces) {
   const words = new Map();
   for (const p of pieces) {
-    if (p.kind !== 'clip' || p.frame || p.contained || p.h < 4) continue;
+    if (p.kind !== 'clip' || p.frame || p.contained || p.h < 4 || p.w > 150) continue;
     words.set(p.word, (words.get(p.word) || false) || !!p.t);
   }
   return [...words.values()].filter((read) => !read).length;
@@ -187,4 +188,62 @@ export function rowsFromPdfText(textContent, viewportTransform, transform, fontN
   }
   for (const row of rows) row.tokens.sort((a, b) => a.x0 - b.x0);
   return rows;
+}
+
+/**
+ * Looks through a song's recognised words again for chords, with the current
+ * rules: column by column, each chord judged by its neighbours, near misses
+ * such as "Cc" corrected. Words already marked stay marked unless their mark
+ * is not a chord name at all; newly found chords are added.
+ * `pages` = [{ w, pieces }] (pieces are changed in place: pass copies).
+ * Returns { found, added, corrected, removed }.
+ */
+/** True when a page still has text to read: mostly unread (a scan), or several words the PDF gave no text for. */
+export function needsReading(pieces) {
+  const clips = pieces.filter((p) => p.kind === 'clip' && !p.frame && !p.contained);
+  if (!clips.length) return false;
+  return clips.filter((p) => p.t).length < clips.length / 2 || unreadWords(pieces) >= 3;
+}
+
+export function rescanChords(pages) {
+  const result = { found: 0, added: 0, corrected: 0, removed: 0 };
+  const perPage = pages.map((page) => {
+    const tokens = new Map();
+    for (const p of page.pieces) {
+      if (p.kind !== 'clip' || !p.t || p.contained || p.frame) continue;
+      let token = tokens.get(p.tok);
+      if (!token) tokens.set(p.tok, (token = { text: p.t, x0: p.x, y0: p.y, x1: p.x + p.w, y1: p.y + p.h, pieces: [] }));
+      token.pieces.push(p);
+      token.x0 = Math.min(token.x0, p.x);
+      token.y0 = Math.min(token.y0, p.y);
+      token.x1 = Math.max(token.x1, p.x + p.w);
+      token.y1 = Math.max(token.y1, p.y + p.h);
+    }
+    return { items: [...tokens.values()], width: page.w };
+  });
+  const gutters = guttersOfPages(perPage);
+  perPage.forEach(({ items }, pageIndex) => {
+    for (const column of inColumns(items, gutters[pageIndex])) {
+      for (const row of rowsOf(column)) {
+        const names = chordTokens(row.items, { repair: true });
+        row.items.forEach((token, i) => {
+          const before = token.pieces[0].chord;
+          const name = names.get(i);
+          if (name) {
+            result.found++;
+            if (!before) result.added++;
+            else if (before !== name) result.corrected++;
+            for (const p of token.pieces) { p.chord = name; p.t = name; }
+          } else if (before && before !== '?' && !isChord(before)) {
+            // Marked as a chord by an older version, but not a chord name (a heading, a word).
+            result.removed++;
+            for (const p of token.pieces) delete p.chord;
+          } else if (before) {
+            result.found++;
+          }
+        });
+      }
+    }
+  });
+  return result;
 }

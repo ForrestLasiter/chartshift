@@ -59,6 +59,21 @@ const checks = {
     assert.deepEqual(p.ownSize, ['portrait', 'landscape']);
     assert.deepEqual([p.stillDrawn, p.closed], [true, true]);
   },
+  'rescan finds the chords again and reports what changed': () => {
+    const r = report.rescan;
+    assert.equal(r.before, 0);
+    assert.equal(r.after, 'G C G Em C D C G D Em C G D G G C G Em C D');
+    assert.match(r.status, /^Found 20 chords\./);
+    assert.equal(r.review, 'Check the chords');
+    assert.match(r.again, /^Found 20 chords\. Nothing new was found\./);
+  },
+  'two columns fit a long song on fewer pages, inside the page, with long lines wrapped': () => {
+    const c = report.columns;
+    assert.ok(c.twoPages < c.onePages, `${c.twoPages} pages in two columns, ${c.onePages} in one`);
+    assert.deepEqual([c.rightColumnUsed, c.insidePage, c.wrapped, c.saved], [true, true, true, 2]);
+    assert.equal(c.allWordsKept, 16);
+    assert.equal(c.chords, 64);
+  },
   'a new song opens on the Write tab': () => {
     const w = report.writing;
     assert.deepEqual([w.dialog, w.tab, w.name], ['New song', 'Write', 'Morning Song']);

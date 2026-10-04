@@ -23,14 +23,14 @@ npm run dist:win
 
 Needs Node.js 20 or newer.
 
-Other scripts: `npm test` (unit tests), `npm run shots` (captures screenshots of the main screens at several window sizes and scaling levels into `screenshots/`), `npm run smoke` (drives the real app in Electron against throwaway folders and checks library conflicts, recovery, the content security policy, navigation/IPC lock-down, keyboard and focus behaviour, mixed-size printing and OCR; `node scripts/check-smoke.mjs release/win-unpacked/ChartShift.exe` runs the same checks on a packaged build), `npm run sample` (regenerates `public/sample.pdf`), `npm run web` (editor in a browser, for development).
+Other scripts: `npm test` (unit tests), `node scripts/song-to-text.mjs <song.chartshift>` (prints the editable-text version of a saved song), `npm run shots` (captures screenshots of the main screens at several window sizes and scaling levels into `screenshots/`), `npm run smoke` (drives the real app in Electron against throwaway folders and checks library conflicts, recovery, the content security policy, navigation/IPC lock-down, keyboard and focus behaviour, mixed-size printing and OCR; `node scripts/check-smoke.mjs release/win-unpacked/ChartShift.exe` runs the same checks on a packaged build), `npm run sample` (regenerates `public/sample.pdf`), `npm run web` (editor in a browser, for development).
 
 ## What it does
 
 - **Rearrange**: grab by section, block, line, word or letter; drag, nudge, resize, copy, erase; add text boxes; add, reorder and delete pages. Drag a selection onto another page to move it there (the view scrolls if you drag to its edge). Pages sit next to each other when the window is wide enough; the two-page button zooms to fit two across.
 - **Scan cleanup** (automatic on scans and photos): straightens tilted pages, whitens grey or unevenly lit paper, drops specks. "Remove stray specks" catches leftovers.
 - **Sections**: name a group of lines (Verse, Chorus…), then move it up/down, repeat it, or delete it and close the gap. "Find sections from headings" does this from the text: it recognises bracketed headings as used by Ultimate Guitar (`[Verse 1]`, `[Chorus]`, `[Guitar Solo]`, `[Chorus] x2`) as well as plain ones (`Verse 1`, `Chorus x2`, `Bridge:`). A scan needs "Read text from scan" first.
-- **Chords**: transpose by half steps or to a key, capo shapes, Nashville numbers. Digital PDFs are read directly; scans use built-in OCR followed by a "Check the chords" review.
+- **Chords**: transpose by half steps or to a key, capo shapes, Nashville numbers. Digital PDFs are read directly; scans use built-in OCR followed by a "Check the chords" review. **Rescan for chords** looks through the page again at any time and updates the list: it reads any text not yet read, finds chords that were missed (for example in a song saved by an older version), corrects misreads such as "Cc", and keeps the corrections you made by hand. The key is judged from all of a song's chords, not just the first.
 - **Layout**: fit a song on one page, or large print.
 - **ChordPro**: open `.cho`/`.chopro` files and export to `.cho`.
 - **Library**: every song and setlist lives in one folder (`Documents\ChartShift Library` by default). Export/import the whole library as a zip, or keep the folder inside OneDrive/Google Drive/Dropbox to sync. Setlists save or print as one PDF.
@@ -45,13 +45,14 @@ Other scripts: `npm test` (unit tests), `npm run shots` (captures screenshots of
 - **Chords in the key**: once a key is chosen, its seven chords appear as buttons with their numbers (1, 2m, 3m, 4, 5, 6m, 7°); a button puts the chord in at the cursor.
 - **Syllable counts**: a rough count beside every line, for matching lines to each other. It is a guide, not a dictionary.
 - **Song structure** (Sections tab): the sections as a list; move one earlier or later, repeat it, or delete it. This rewrites the text.
+- **Columns**: one column, or two columns under the title, which fits about twice as much on a page. Lines too wide for a column are wrapped, each chord staying with its words.
 - **Chord diagrams**: guitar or ukulele fingering boxes for the chords used, in a row under the title. Unusual chords are shown as the plainer chord of the same family (C7 for C9); chords with no shape (dim, aug) are left out.
 - **Drafts**: keep a named copy of the words, and go back to it later. Drafts are saved inside the song. Going back keeps what you had as "Before restoring".
 - **Transpose, capo and Nashville numbers** (Chords tab) rewrite the chords in the text.
 
 You can still drag things on the page of a written song, but the page is laid out again the next time the text changes, which puts them back; ChartShift asks before doing that.
 
-A chart opened from a PDF can be turned into a written song with **Turn this chart into editable text** on its Write tab, once its text has been read. This makes a new song from the recognised words and chord positions and leaves the chart as it was.
+A chart opened from a PDF can be turned into a written song with **Turn this chart into editable text** on its Write tab, once its text has been read. This makes a new song from the recognised words and chord positions and leaves the chart as it was. The chart is read one column at a time, then page by page; each row of chords is folded into the lyric line beneath it (including when a long line was wrapped and its chords sit on two rows, or when the words continue at the top of the next column); the large first line becomes the title and page numbers are left out. A long song is set in two columns. Chords are put where the chart has them, so one that sits in the middle of a word stays there: check a few by eye.
 
 ## Chords from a recording (experimental)
 

@@ -228,6 +228,25 @@ function runSmoke(win, { output, withPrintWindow, preload }) {
       __editor.undo();
       out.printPreview = preview1;
 
+      // Rescan for chords: forget which words are chords (the text stays), then find them again.
+      const rs = {};
+      const noMarks = __editor.getState().pages.map((pg) => ({ ...pg, pieces: pg.pieces.map(({ chord, ...q }) => q) }));
+      __editor.commit(noMarks, { status: 'marks cleared' });
+      rs.before = __editor.chordList().length;
+      press('Chords'); await sleep(150);
+      press('Rescan for chords');
+      for (let i = 0; i < 100 && (__editor.getState().busy || __editor.getState().status === 'marks cleared'); i++) await sleep(100);
+      await sleep(300);
+      rs.after = __editor.chordList().map((c) => c.text).join(' ');
+      rs.status = __editor.getState().status;
+      rs.review = document.querySelector('dialog[open] h2')?.textContent;
+      document.querySelector('dialog[open]')?.dispatchEvent(new Event('cancel', { cancelable: true })); await sleep(300);
+      press('Rescan for chords');
+      for (let i = 0; i < 100 && (__editor.getState().busy || !/Nothing new/.test(__editor.getState().status)); i++) await sleep(100);
+      rs.again = __editor.getState().status;
+      document.querySelector('dialog[open]')?.dispatchEvent(new Event('cancel', { cancelable: true })); await sleep(300);
+      out.rescan = rs;
+
       // Songwriting: start a new song, type it, and use the writing tools.
       window.confirm = () => true; // "discard changes?" would otherwise wait for a person
       const setValue = (el, value) => {
@@ -283,6 +302,21 @@ function runSmoke(win, { output, withPrintWindow, preload }) {
       press('Open Morning Song', document.querySelector('dialog[open]')); await sleep(1500);
       w.reopened = { write: !!S().write, sameText: S().write && S().write.text === textBefore, title: S().write && S().write.meta.title, drafts: S().write && S().write.drafts.length, diagrams: S().write && S().write.diagrams, tab: document.querySelector('.inspector [role=tab][aria-selected=true]').textContent.trim(), diagramPieces: S().pages[0].pieces.filter((q) => q.kind === 'diagram').length };
       w.unnamed = [...document.querySelectorAll('button')].filter((el) => !named(el)).length + [...document.querySelectorAll('input, select, textarea')].filter((el) => !labelled(el)).length;
+      // Two columns fit a long song on fewer pages.
+      press('Write'); await sleep(150);
+      const verse = 'Verse\\n[G]Morning light is [C]on the hills again and the song goes on a long while yet\\n[Em]Every shadow [D]fades';
+      __editor.setWrite({ text: Array.from({ length: 16 }, () => verse).join('\\n\\n') }); await sleep(200);
+      const cols = { onePages: S().pages.length };
+      setValue([...document.querySelectorAll('.inspector select')].find((x) => [...x.options].some((o) => o.textContent === 'One column')), '2'); await sleep(250);
+      const laid = S().pages;
+      cols.twoPages = laid.length;
+      cols.rightColumnUsed = laid[0].pieces.some((q) => q.kind === 'text' && q.x > 300);
+      cols.insidePage = laid.every((pg) => pg.pieces.every((q) => q.x >= 50 && q.x + q.w <= pg.w - 40 && q.y + q.h <= pg.h - 40));
+      cols.wrapped = !laid.some((pg) => pg.pieces.some((q) => q.kind === 'text' && /goes on a long while yet/.test(q.text) && /Morning light/.test(q.text)));
+      cols.allWordsKept = laid.flatMap((pg) => pg.pieces.filter((q) => q.kind === 'text' && !q.chord).map((q) => q.text)).join(' ').match(/Morning light is on the hills again and the song goes on a long while yet/g)?.length || laid.flatMap((pg) => pg.pieces.filter((q) => q.kind === 'text' && !q.chord).map((q) => q.text)).join(' ').replace(/\\s+/g, ' ').match(/Morning light is on the hills again and the song goes on a long while yet/g)?.length;
+      cols.chords = laid.flatMap((pg) => pg.pieces.filter((q) => q.kind === 'text' && q.chord)).length;
+      cols.saved = S().write.columns;
+      out.columns = cols;
       await window.chartshift.library.remove('Morning Song').catch(() => {});
       out.writing = w;
 
@@ -454,7 +488,13 @@ const SCENES = [
     __h.type([...document.querySelectorAll('.inspector select')].find((x) => [...x.options].some((o) => o.textContent === 'Ukulele')), 'guitar');
     await __h.press('Fit');
     await __h.sleep(300);`],
-  ['15-write-structure', `await __h.press('Sections');`],
+  ['14b-two-columns', `
+    const base = __editor.getState().write.text;
+    __editor.setWrite({ text: [base, base.replace(/Verse 1/, 'Verse 3').replace(/Verse 2/, 'Verse 4'), base.replace(/Verse 1/, 'Verse 5').replace(/Verse 2/, 'Bridge'), 'Outro\\n[G]One more long line that will not fit in a single column and so has to [C]wrap around to the next [D]line'].join('\\n\\n'), columns: 2 });
+    __editor.set({ zoom: 0.9 });
+    document.querySelector('.workspace').scrollTop = 0;
+    await __h.sleep(300);`],
+  ['15-write-structure', `__editor.setWrite({ text: __editor.getState().write.text.split('\\n\\nVerse 3')[0], columns: 1 }); await __h.press('Fit'); await __h.press('Sections');`],
   ['16-write-chords', `await __h.press('Chords');`],
   ['17-back-to-sample', `
     document.querySelector('.inspector [role=tab]').click();

@@ -9,7 +9,9 @@
 //
 // It recognises plain major and minor chords. A seventh or sus chord is
 // reported as the major or minor chord it is built on.
-import { noteName, prefersFlats } from './chords.js';
+import { keyOfChords, noteName, prefersFlats } from './chords.js';
+
+export { keyOfChords };
 
 const TARGET_RATE = 11025;      // plenty for chords, and fast
 const FRAME = 4096;             // about 0.37 s at the target rate
@@ -209,32 +211,6 @@ export function detectChords(input, inputRate) {
 }
 
 const round = (seconds) => Math.round(seconds * 100) / 100;
-
-const MAJOR_KEY = [[0, false], [2, true], [4, true], [5, false], [7, false], [9, true]];
-
-/** The key a set of chords most plausibly belongs to: [{ root, minor, seconds }] -> { index, minor } | null. */
-export function keyOfChords(chords) {
-  if (!chords.length) return null;
-  let best = null, bestScore = -1;
-  for (let tonic = 0; tonic < 12; tonic++) {
-    // A major key and its relative minor share their chords; which one it is
-    // is decided by which of the two home chords is played more, and last.
-    let inKey = 0, major = 0, minor = 0;
-    const relative = (tonic + 9) % 12;
-    for (const c of chords) {
-      if (MAJOR_KEY.some(([step, m]) => (tonic + step) % 12 === c.root && m === c.minor)) inKey += c.seconds;
-      if (c.root === tonic && !c.minor) major += c.seconds;
-      if (c.root === relative && c.minor) minor += c.seconds;
-    }
-    const final = chords[chords.length - 1], first = chords[0];
-    const home = (c, root, m) => (c.root === root && c.minor === m ? 1 : 0);
-    major += (home(final, tonic, false) + home(first, tonic, false)) * 2;
-    minor += (home(final, relative, true) + home(first, relative, true)) * 2;
-    const score = inKey + 0.4 * Math.max(major, minor);
-    if (score > bestScore) { bestScore = score; best = minor > major ? { index: relative, minor: true } : { index: tonic, minor: false }; }
-  }
-  return best;
-}
 
 /**
  * The chords as song text for the Write tab: "[G] [C] [G] [D]", a few to a

@@ -16,6 +16,7 @@ import { renderPageCanvas } from './lib/render.js';
 import { FONTS } from './lib/text.js';
 import { keyName } from './lib/chords.js';
 import { createRecoveryQueue } from './lib/recoveryQueue.js';
+import { needsReading } from './lib/textlayer.js';
 import { planPrint } from './lib/printPlan.js';
 import { LIMITS } from './lib/songSchema.js';
 import * as platform from './lib/platform.js';
@@ -248,7 +249,9 @@ export function App() {
     if (!confirmDiscard()) return;
     const { meta, text } = splitChordPro(source);
     const key = editor.songKey();
-    startWritten(newWrite({ ...meta, key: key ? keyName(key) : '' }, text), `${st.name || 'Untitled'} (text)`,
+    // A long song is set in two columns, as charts usually are, to keep it to a few pages.
+    const typed = { ...newWrite({ ...meta, key: key ? keyName(key) : '' }, text), columns: text.split('\n').length > 40 ? 2 : 1 };
+    startWritten(typed, `${st.name || 'Untitled'} (text)`,
       'Made a typed copy of the chart. Check the words and chord positions; the original chart was not changed.');
   }, [editor, startWritten, confirmDiscard]);
 
@@ -271,20 +274,28 @@ export function App() {
   const pickAudio = useCallback(async () => (window.__testAudio && new URLSearchParams(location.search).has('debug')
     ? { name: 'test.wav', data: window.__testAudio } : platform.openAudio()), []);
 
-  // OCR every page that still has unread pieces, then let the user check the chords.
-  const readText = useCallback(() => run('Reading text…', async (progress) => {
-    const { recognise } = await import('./lib/ocr.js');
+  // Finds the chords on a chart. Text that has not been read yet is read
+  // first (OCR), then every page is looked through again with the current
+  // rules, chords that were spotted but not read get a closer look, and the
+  // list is shown for checking. Safe to run again at any time: it updates the
+  // list rather than starting over, and corrections made by hand are kept.
+  const findChords = useCallback((label) => run(label, async (progress) => {
     const st = editor.getState();
+    const before = editor.chordList().length;
     const rows = [];
+    let read = false;
     for (let i = 0; i < st.pages.length; i++) {
       const page = st.pages[i];
-      // Pages that already have all their text are skipped; OCR only fills in what is missing.
-      const clips = page.pieces.filter((p) => p.kind === 'clip' && !p.frame && !p.contained);
-      if (!clips.length || clips.every((p) => p.t)) { rows.push(null); continue; }
+      // Pages whose text has been read are skipped; OCR only fills in what is missing.
+      if (!needsReading(page.pieces)) { rows.push(null); continue; }
+      const { recognise } = await import('./lib/ocr.js');
       progress(`Reading text on page ${i + 1} of ${st.pages.length}… (the first time takes a little longer)`);
       rows.push(await recognise(renderPageCanvas(page, editor.atlases, OCR_DPI), OCR_DPI / 72));
+      read = true;
     }
-    editor.applyRecognisedText(rows);
+    if (read) editor.applyRecognisedText(rows);
+    progress('Looking for chords…');
+    const changed = editor.rescanChords();
     // Chords that were spotted but not read get a second, closer look.
     const unknown = editor.chordList().filter((c) => c.text === '?');
     if (unknown.length) {
@@ -302,10 +313,18 @@ export function App() {
     }
     const chords = editor.chordList();
     const unsure = chords.filter((c) => c.text === '?').length;
-    editor.set({ status: `Found ${chords.length} chords.${unsure ? ` ${unsure} could not be read and are marked “?”: fix them in “Check the chords”.` : ' Check them before transposing.'}` });
+    const extra = chords.length - before;
+    const news = before && !read
+      ? (extra > 0 || changed.corrected || changed.removed
+        ? ` ${[extra > 0 && `${extra} more than before`, changed.corrected && `${changed.corrected} corrected`, changed.removed && `${changed.removed} wrong marks removed`].filter(Boolean).join(', ')}.`
+        : ' Nothing new was found.')
+      : '';
+    editor.set({ status: `Found ${chords.length} chords.${news}${unsure ? ` ${unsure} could not be read and are marked “?”: fix them in “Check the chords”.` : chords.length ? ' Check them before transposing.' : ''}` });
     setInspectorTab('chords');
     if (chords.length) setDialog('review');
   }), [editor, run]);
+  const readText = useCallback(() => findChords('Reading text…'), [findChords]);
+  const rescan = useCallback(() => findChords('Rescanning for chords…'), [findChords]);
 
   const loadSetlist = useCallback(async (setlist, progress) => {
     const songs = [];
@@ -574,7 +593,7 @@ export function App() {
         </main>
         {hasDoc && inspectorOpen && (
           <Inspector editor={editor} state={state} tab={inspectorTab} onTab={setInspectorTab}
-            onReadText={readText} onReview={() => setDialog('review')} onPdf={savePdf} onPrint={print} onChordPro={saveChordPro} onConvert={convertToText} onListen={() => setDialog('listen')} />
+            onReadText={readText} onReview={() => setDialog('review')} onRescan={rescan} onPdf={savePdf} onPrint={print} onChordPro={saveChordPro} onConvert={convertToText} onListen={() => setDialog('listen')} />
         )}
       </div>
 

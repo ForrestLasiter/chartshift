@@ -79,7 +79,7 @@ function Sections({ editor, state }) {
   );
 }
 
-function Chords({ editor, state, onReadText, onReview }) {
+function Chords({ editor, state, onReadText, onReview, onRescan }) {
   const written = !!state.write;
   const chords = editor.chordList();
   const key = editor.songKey();
@@ -119,6 +119,7 @@ function Chords({ editor, state, onReadText, onReview }) {
             <button type="button" className="btn outline block" onClick={onReadText}><Icon name="scan" />Read the missed text</button>
           </div>
         )}
+        {!written && <button type="button" className="btn outline block" onClick={onRescan} title="Look through the page again for chords and update the list">Rescan for chords</button>}
         {!written && <button type="button" className="btn outline block" onClick={onReview} disabled={none}>Check the chords…</button>}
         {written && <p className="muted">Changing the key rewrites the chords in the song’s text.</p>}
       </div>
@@ -202,7 +203,7 @@ function PageTools({ editor, onPdf, onPrint, onChordPro }) {
   );
 }
 
-export function Inspector({ editor, state, tab, onTab, onReadText, onReview, onPdf, onPrint, onChordPro, onConvert, onListen }) {
+export function Inspector({ editor, state, tab, onTab, onReadText, onReview, onRescan, onPdf, onPrint, onChordPro, onConvert, onListen }) {
   return (
     <aside className={`inspector${tab === 'write' && state.write ? ' wide' : ''}`} aria-label="Song tools">
       <h2 className="sr-only">Song tools</h2>
@@ -210,7 +211,7 @@ export function Inspector({ editor, state, tab, onTab, onReadText, onReview, onP
       <TabPanel prefix={PREFIX} id={tab} className="inspector-body">
         {tab === 'write' && <WriteTab editor={editor} state={state} onConvert={onConvert} onListen={onListen} />}
         {tab === 'sections' && (state.write ? <StructureList editor={editor} state={state} /> : <Sections editor={editor} state={state} />)}
-        {tab === 'chords' && <Chords editor={editor} state={state} onReadText={onReadText} onReview={onReview} />}
+        {tab === 'chords' && <Chords editor={editor} state={state} onReadText={onReadText} onReview={onReview} onRescan={onRescan} />}
         {tab === 'page' && <PageTools editor={editor} onPdf={onPdf} onPrint={onPrint} onChordPro={onChordPro} />}
       </TabPanel>
     </aside>
