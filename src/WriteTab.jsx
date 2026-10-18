@@ -86,7 +86,7 @@ function Drafts({ editor, write }) {
   );
 }
 
-export function WriteTab({ editor, state, onConvert, onListen }) {
+export function WriteTab({ editor, state, onConvert }) {
   const write = state.write;
   const area = useRef(null);
   const gutter = useRef(null);
@@ -103,7 +103,13 @@ export function WriteTab({ editor, state, onConvert, onListen }) {
   }
 
   const lines = write.text.split('\n');
-  const counts = lines.map(lineSyllables);
+  // Lines inside a tab block are not sung, so they get no count.
+  let inTab = false;
+  const counts = lines.map((line) => {
+    if (/^\s*\{(start_of_tab|sot)\b/i.test(line)) { inTab = true; return null; }
+    if (/^\s*\{(end_of_tab|eot)\b/i.test(line)) { inTab = false; return null; }
+    return inTab ? null : lineSyllables(line);
+  });
   const palette = chordsInKey(editor.writtenKey());
 
   // Typing lays the page out afresh, which would undo pieces moved by hand.
@@ -160,7 +166,6 @@ export function WriteTab({ editor, state, onConvert, onListen }) {
         <p className="muted">
           {here != null ? `Line ${caretLine + 1}: about ${here} syllable${here === 1 ? '' : 's'}.` : 'The numbers beside each line are a rough syllable count.'}
         </p>
-        <button type="button" className="btn outline block" onClick={onListen}><Icon name="mic" />Chords from a recording… <span className="badge">Experimental</span></button>
         <label className="field">Add a section
           <select value="" onChange={(e) => addSection(e.target.value)}>
             <option value="">Choose…</option>

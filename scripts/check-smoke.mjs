@@ -14,7 +14,7 @@ const result = spawnSync(electron, packaged ? [] : ['.'], {
   cwd: root,
   encoding: 'utf8',
   timeout: 240000,
-  env: { ...process.env, CHARTSHIFT_SMOKE: join(root, 'smoke.png'), CHARTSHIFT_SMOKE_OCR: '1' },
+  env: { ...process.env, CHARTSHIFT_SMOKE: join(root, 'smoke.png'), CHARTSHIFT_SMOKE_OCR: '1', CHARTSHIFT_SHEET: join(root, 'test', 'fixtures', 'old-hundredth.png') },
 });
 const line = (result.stdout || '').split('\n').find((l) => l.startsWith('SMOKE REPORT:'));
 if (!line) {
@@ -110,25 +110,41 @@ const checks = {
     assert.deepEqual(w.reopened, { write: true, sameText: true, title: 'Morning Song', drafts: 2, diagrams: 'guitar', tab: 'Write', diagramPieces: 4 });
     assert.equal(w.unnamed, 0);
   },
-  'chords are read from a recording and shown for checking': () => {
-    const l = report.listening;
-    assert.equal(l.error, null);
-    assert.equal(l.title, 'Chords from a recording');
-    assert.deepEqual(l.chips, ['G', 'C', 'D', 'Em', 'C', 'G']);
-    assert.deepEqual(l.times.map((t) => t.split(':')[1]).map(Number).map((sec, i) => Math.abs(sec - i * 2) <= 1), [true, true, true, true, true, true]);
-    assert.match(l.summary, /6 chord changes in 0:1[12] · key looks like G/);
-    assert.equal(l.text, '[G] [C] [D] [Em]\n[C] [G]');
-    assert.deepEqual([l.hasPlayer, l.startUnnamed, l.resultUnnamed], [true, 0, 0]);
+  'a chart with no staffs has no sheet music to read': () => {
+    assert.deepEqual(report.sheet.empty, { title: 'Read sheet music', text: 'No music was found. ChartShift looks for printed staffs (five lines) with notes on them.' });
   },
-  'heard chords go into the song': () => {
-    const l = report.listening;
-    assert.deepEqual([l.canAppend, l.appended, l.closed], [true, true, true]);
-    assert.deepEqual(l.onPage, ['G', 'C', 'D', 'Em', 'C', 'G']);
+  'printed music is read: notes, key, chords bar by bar, and a tab preview': () => {
+    const s = report.sheet;
+    assert.equal(s.pages, 1);
+    assert.equal(s.summary, '76 notes on 1 line of music. Key of G · 4/4');
+    assert.equal(s.lines.length, 1);
+    assert.match(s.lines[0], /^Line 1: \| G \| G \| G /);
+    assert.match(s.preview, /^ +G +G /, 'chords above the tab, in line with it');
+    const strings = s.preview.split('\n').filter((l) => /^[eBGDAE]\|/.test(l)).length;
+    assert.ok(strings >= 6 && strings % 6 === 0, `${strings} string lines`);
+    assert.deepEqual(s.boxes, [true, true], 'chords and note names, as the chart has no chords of its own');
+    assert.equal(s.unnamed, 0);
   },
-  'the camera is refused; the microphone is not blocked by the app': () => {
-    assert.notEqual(report.listening.camera, 'granted');
-    // On a PC with no microphone this is NotFoundError; it must not be a refusal by the app itself.
-    assert.ok(['granted', 'NotFoundError', 'NotReadableError'].includes(report.listening.microphone), report.listening.microphone);
+  'chords and note names go onto the page, and the chords transpose': () => {
+    const s = report.sheet;
+    assert.ok(s.chords.length >= 6 && s.chords[0] === 'G', s.chords.join(' '));
+    assert.deepEqual(s.notes.slice(0, 4), ['G', 'G', 'F#', 'E'], 'the tune is the top part');
+    assert.equal(s.notes.length, 19);
+    assert.match(s.status, /^Added \d+ chords and 19 note names\./);
+    assert.equal(s.transposed[0], 'A');
+    assert.equal(s.transposed.length, s.chords.length);
+  },
+  'a chord and tab sheet is made as a new typed song': () => {
+    const s = report.sheet;
+    assert.deepEqual([s.written, s.name], [true, 'Old Hundredth (chords and tab)']);
+    assert.ok(s.tabBlocks >= 1);
+    assert.deepEqual(s.strings, ['e|', 'B|', 'G|', 'D|', 'A|', 'E|']);
+    assert.equal(s.stringsLinedUp, true, 'six strings in a fixed-width font, one under another');
+    assert.ok(s.sheetChords >= 6);
+  },
+  'the camera and the microphone are refused': () => {
+    // Refused by the app, or (on a PC without one) not there at all; never granted.
+    for (const device of ['camera', 'microphone']) assert.ok(['NotAllowedError', 'NotFoundError', 'NotReadableError'].includes(report.devices[device]), `${device}: ${report.devices[device]}`);
   },
   'checking for updates asks GitHub and reports the result': () => {
     const u = report.updates;

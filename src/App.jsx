@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createEditor, useEditorState, LEVELS } from './editor/store.js';
 import { PageView } from './PageView.jsx';
 import { Inspector } from './Inspector.jsx';
-import { ListenDialog } from './ListenDialog.jsx';
+import { SheetMusicDialog } from './SheetMusicDialog.jsx';
 import { UpdateDialog } from './UpdateDialog.jsx';
 import { Icon, Logo } from './icons.jsx';
 import { IconButton, Menu, Segmented } from './ui.jsx';
@@ -25,6 +25,8 @@ import * as platform from './lib/platform.js';
 const ZOOM_STEPS = [0.5, 0.67, 0.8, 1, 1.25, 1.5, 2, 3];
 const AUTOSAVE_MS = 15000;
 const OCR_DPI = 300;
+// Sheet music is read from a 300 dpi picture of the page, like printed text.
+const SHEET_DPI = 300;
 const LEVEL_HELP = {
   section: 'Whole sections (Verse, Chorus…)',
   block: 'A chord line with its lyric line, a staff, a tab system',
@@ -160,6 +162,11 @@ export function App() {
     if (file) await loadFile(file);
   }, [loadFile, confirmDiscard]);
 
+  // Test runs (?debug) hand files in directly instead of through the file dialog.
+  useEffect(() => {
+    if (new URLSearchParams(location.search).has('debug')) window.__openFile = (name, data) => loadFile({ name, data });
+  }, [loadFile]);
+
   const openSample = useCallback(async () => {
     if (!confirmDiscard()) return;
     const response = await fetch('./sample.pdf');
@@ -257,24 +264,32 @@ export function App() {
       'Made a typed copy of the chart. Check the words and chord positions; the original chart was not changed.');
   }, [editor, startWritten, confirmDiscard]);
 
-  // Chords heard in a recording go into a written song: this one, or a new one.
-  const useHeardChords = useCallback((text, heard, where) => {
+  // Reads printed music (staffs and notes) on every page, then shows what
+  // was found: chords and note names to add to the page, or a new sheet with
+  // chords and guitar tab.
+  const readSheetMusic = useCallback(() => run('Reading the music…', async (progress) => {
+    const st = editor.getState();
+    if (!st.pages) return;
+    const [{ readMusic }, { analyse }] = await Promise.all([import('./lib/omr.js'), import('./lib/sheet.js')]);
+    const readings = [];
+    for (let i = 0; i < st.pages.length; i++) {
+      progress(`Reading the music on page ${i + 1} of ${st.pages.length}…`);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      const canvas = renderPageCanvas(st.pages[i], editor.atlases, SHEET_DPI);
+      const music = readMusic(canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height));
+      readings.push({ pageIndex: i, scale: SHEET_DPI / 72, music, result: analyse(music) });
+    }
+    setDialog({ type: 'sheet', readings, pageHasChords: editor.chordList().length > 0 });
+  }), [editor, run]);
+
+  const makeTabSheet = useCallback((text) => {
+    if (!confirmDiscard()) return;
     setDialog(null);
     const st = editor.getState();
-    if (where === 'append' && st.write) {
-      editor.setWrite({ text: `${st.write.text.replace(/\s+$/, '')}${st.write.text.trim() ? '\n\n' : ''}${text}\n` }, `Added ${heard.chords.length} chords from the recording. Check them against what was played.`);
-      setInspectorOpen(true);
-      setInspectorTab('write');
-      return;
-    }
-    if (!confirmDiscard()) return;
-    startWritten(newWrite({ key: heard.key ? keyName(heard.key) : '' }, `${text}\n`), 'Untitled song',
-      `New song with ${heard.chords.length} chords from the recording. Check them against what was played, then add the words.`);
+    const { meta, text: body } = splitChordPro(text);
+    startWritten(newWrite(meta, body), `${st.name || 'Untitled'} (chords and tab)`,
+      'Made a chord and tab sheet from the printed music. Check it against the music; the original was not changed.');
   }, [editor, startWritten, confirmDiscard]);
-
-  // The smoke test hands in a recording directly instead of using the file dialog.
-  const pickAudio = useCallback(async () => (window.__testAudio && new URLSearchParams(location.search).has('debug')
-    ? { name: 'test.wav', data: window.__testAudio } : platform.openAudio()), []);
 
   // Finds the chords on a chart. Text that has not been read yet is read
   // first (OCR), then every page is looked through again with the current
@@ -523,7 +538,7 @@ export function App() {
           <button type="button" className="btn" onClick={print} disabled={!hasDoc} title="Print preview and print (Ctrl+P)" aria-label="Print"><Icon name="print" /><span className="optional">Print</span></button>
           <Menu label="More file actions" items={[
             { label: 'Save under a new name…', icon: 'save', shortcut: 'Ctrl+Shift+S', disabled: !hasDoc, onSelect: () => saveSong(true) },
-            { label: 'Chords from a recording… (experimental)', icon: 'mic', onSelect: () => setDialog('listen') },
+            { label: 'Read sheet music…', icon: 'music', disabled: !hasDoc || !!state.write, onSelect: readSheetMusic },
             { label: 'Export as ChordPro (.cho)', icon: 'music', disabled: !hasDoc, onSelect: saveChordPro },
             { label: 'Open the sample chart', icon: 'page', onSelect: openSample },
             { label: 'Check for updates…', icon: 'update', onSelect: () => setDialog('update') },
@@ -593,11 +608,11 @@ export function App() {
             <div className="welcome">
               <div className="welcome-head"><Logo size={40} /><h1>ChartShift</h1></div>
               <p className="lead">Open a chord chart, tab or sheet music PDF and every line, word and letter becomes a piece you can move, erase or copy. Or start from a blank page and write a song of your own. Change the key, then save it as a PDF or print it.</p>
+              <p className="lead">Sheet music from a book? Open it, then choose <strong>Read sheet music</strong> on the Chords tab to get its chords, note names and guitar tab.</p>
               <div className="welcome-actions">
                 <button type="button" className="btn primary large" onClick={open}><Icon name="folder" />Open a PDF or image…</button>
                 <button type="button" className="btn outline large" onClick={() => setDialog('newSong')}><Icon name="edit" />Write a new song</button>
                 <button type="button" className="btn outline large" onClick={() => setDialog('library')}><Icon name="library" />Song library</button>
-                <button type="button" className="btn outline large" onClick={() => setDialog('listen')}><Icon name="mic" />Chords from a recording <span className="badge">Experimental</span></button>
               </div>
               <h2>Recent songs</h2>
               {recent.length ? (
@@ -619,7 +634,7 @@ export function App() {
         </main>
         {hasDoc && inspectorOpen && (
           <Inspector editor={editor} state={state} tab={inspectorTab} onTab={setInspectorTab}
-            onReadText={readText} onReview={() => setDialog('review')} onRescan={rescan} onPdf={savePdf} onPrint={print} onChordPro={saveChordPro} onConvert={convertToText} onListen={() => setDialog('listen')} />
+            onReadText={readText} onReview={() => setDialog('review')} onRescan={rescan} onPdf={savePdf} onPrint={print} onChordPro={saveChordPro} onConvert={convertToText} onReadMusic={readSheetMusic} />
         )}
       </div>
 
@@ -635,8 +650,10 @@ export function App() {
           onSetlistPrint={(s) => { setDialog(null); setlistPrint(s); }}
           notify={(status) => editor.set({ status })} />
       )}
-      {dialogType === 'listen' && (
-        <ListenDialog pickFile={pickAudio} canAppend={!!state.write} onUse={useHeardChords} onClose={() => setDialog(null)} />
+      {dialogType === 'sheet' && (
+        <SheetMusicDialog readings={dialog.readings} title={state.name || ''} pageHasChords={dialog.pageHasChords} onClose={() => setDialog(null)}
+          onAdd={(options) => { setDialog(null); editor.addSheetLabels(dialog.readings, options); }}
+          onMakeSheet={makeTabSheet} />
       )}
       {dialogType === 'update' && (
         <UpdateDialog unsaved={state.dirty} onClose={() => setDialog(null)} onChecked={(latest) => setNewVersion(latest.available ? latest.version : null)} />

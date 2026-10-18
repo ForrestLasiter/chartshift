@@ -118,7 +118,7 @@ function clusterLines(items, hm) {
  * appends { x0, y0, x1, y1, area } to `comps`; numbering continues from the
  * components already in `comps`, so it can be called for a second mask.
  */
-function labelComponents(mask, W, H, labels, comps) {
+export function labelComponents(mask, W, H, labels, comps) {
   const base = comps.length;
   const local = new Int32Array(W * H);
   let parent = new Int32Array(1 << 16);

@@ -7,6 +7,7 @@ import { boundsOf } from '../lib/render.js';
 import { installSections } from './sections.js';
 import { installMusic } from './music.js';
 import { installWriting } from './writing.js';
+import { installSheetMusic } from './sheetmusic.js';
 
 const MAX_UNDO = 200;
 export const LEVELS = ['section', 'block', 'line', 'word', 'letter'];
@@ -405,6 +406,7 @@ export function createEditor() {
   installSections(ed);
   installMusic(ed);
   installWriting(ed);
+  installSheetMusic(ed);
   return ed;
 }
 

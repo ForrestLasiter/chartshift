@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, protocol, net, Menu, session } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, protocol, net, Menu, screen, session } = require('electron');
 const path = require('path');
 const os = require('os');
 const fs = require('fs/promises');
@@ -68,10 +68,24 @@ app.on('web-contents-created', (_event, contents) => {
   contents.on('will-attach-webview', (event) => event.preventDefault());
 });
 
+// Test runs open on a second screen, if there is one, without taking the
+// keyboard: the main screen may be in use. With one screen they stay hidden.
+function testPlacement() {
+  const primary = screen.getPrimaryDisplay();
+  const other = screen.getAllDisplays().find((d) => d.id !== primary.id);
+  if (!other) return null;
+  const area = other.workArea;
+  return { x: area.x + 20, y: area.y + 20, width: Math.min(1400, area.width - 40), height: Math.min(950, area.height - 40) };
+}
+
 function createWindow() {
+  const place = TESTING ? testPlacement() : null;
   win = new BrowserWindow({
     width: 1400,
     height: 950,
+    ...(place || {}),
+    show: !TESTING,
+    focusable: !TESTING,
     minWidth: 900,
     minHeight: 600,
     backgroundColor: '#d5d9de',
@@ -85,6 +99,7 @@ function createWindow() {
     },
   });
   win.loadURL(DEV ? 'http://localhost:5183' : `app://chartshift/index.html${TESTING ? '?sample&debug' : ''}`);
+  if (TESTING && place) win.showInactive();
   if (TESTING) {
     const harness = require('./harness.cjs');
     const preload = path.join(__dirname, 'preload.cjs');
@@ -122,19 +137,6 @@ handle('file:open', async () => {
   const filePath = result.filePaths[0];
   const { size } = await fs.stat(filePath);
   if (size > safety.LIMITS.songBytes) throw new Error(`${path.basename(filePath)} is too large to open (over ${Math.round(safety.LIMITS.songBytes / 1048576)} MB).`);
-  return { name: path.basename(filePath), data: await fs.readFile(filePath) };
-});
-
-handle('audio:open', async () => {
-  const result = await dialog.showOpenDialog(win, {
-    title: 'Choose a recording',
-    defaultPath: app.getPath('music'),
-    properties: ['openFile'],
-    filters: [{ name: 'Audio', extensions: ['wav', 'mp3', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'flac', 'webm', 'wma'] }],
-  });
-  if (result.canceled || !result.filePaths.length) return null;
-  const filePath = result.filePaths[0];
-  if ((await fs.stat(filePath)).size > safety.LIMITS.audioBytes) throw new Error('That recording is too large (over 200 MB).');
   return { name: path.basename(filePath), data: await fs.readFile(filePath) };
 });
 
@@ -242,14 +244,10 @@ app.whenReady().then(() => {
     headers.set('X-Content-Type-Options', 'nosniff');
     return new Response(response.body, { status: response.status, headers });
   });
-  // Everything is refused except the microphone (sound only) for the app's own
-  // page, which "Chords from a recording" needs. No camera, location or the rest.
-  session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
-    callback(!!win && contents === win.webContents
-      && safety.allowPermission({ permission, mediaTypes: details.mediaTypes, url: details.requestingUrl }, DEV));
-  });
-  session.defaultSession.setPermissionCheckHandler((contents, permission, origin, details) => !!win && contents === win.webContents
-    && safety.allowPermission({ permission, mediaTypes: [details.mediaType], url: origin }, DEV));
+  // The app needs no devices or special permissions: camera, microphone,
+  // location and the rest are all refused.
+  session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  session.defaultSession.setPermissionCheckHandler(() => false);
   if (!DEV) Menu.setApplicationMenu(null);
   createWindow();
 });

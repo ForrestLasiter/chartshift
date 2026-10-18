@@ -54,25 +54,28 @@ You can still drag things on the page of a written song, but the page is laid ou
 
 A chart opened from a PDF can be turned into a written song with **Turn this chart into editable text** on its Write tab, once its text has been read. This makes a new song from the recognised words and chord positions and leaves the chart as it was. The chart is read one column at a time, then page by page; each row of chords is folded into the lyric line beneath it (including when a long line was wrapped and its chords sit on two rows, or when the words continue at the top of the next column); the large first line becomes the title and page numbers are left out. A long song is set in two columns. Chords are put where the chart has them, so one that sits in the middle of a word stays there: check a few by eye.
 
-## Chords from a recording (experimental)
+## Reading sheet music
 
-This feature is marked **Experimental** in the app: it is new, and so far has only been tested on computer-generated strumming.
+Printed music from a hymnal, songbook or method book can be turned into chords and guitar tab. Open the PDF or a scan of the page, then choose **Read sheet music…** on the Chords tab (or the More menu).
 
-**Chords from a recording…** (More menu, Write tab, or the welcome screen) listens to an instrument and writes down the chords it hears.
+ChartShift finds the staffs and reads the notes on them: note heads (filled, half and whole), stems, beams, flags and dots, treble and bass clefs (and the guitar clef with an 8 under it), key signatures, sharps, flats and naturals, bar lines and time signatures. From the notes it works out:
 
-- Record with the microphone, or choose an audio file (WAV, MP3, M4A, OGG, FLAC…; up to 15 minutes).
-- The result shows each chord with the time it starts. Play the recording back and the current chord is highlighted; choose a chord to hear that part.
-- The chords are also given as song text, a few to a line, which you can correct before using. Then add them to the end of the song you are writing, or start a new song with them (its key is filled in).
+- **the key** and how many beats there are in a bar;
+- **a chord for each bar**, or each half bar where the harmony moves. With four-part music (a hymn on two staffs) the chord comes from all the parts; with just a tune, it leans on the main chords of the key;
+- **the tune**: the top part of the top staff (the soprano in a hymn);
+- **guitar tab** for the tune, low on the neck, with the hand moving as little as it can.
 
-What to expect: it is a first draft, not a transcription.
+Then either:
 
-- It works best with one guitar or piano playing chords clearly, with no singing and little background noise.
-- It recognises plain major and minor chords. Sevenths and sus chords are written as the chord they are built on.
-- It copes with an instrument tuned a little sharp or flat, and reports roughly how far.
-- It does not hear words or individual notes, and it does not know where bars begin.
-- So far it has only been tested on computer-generated strumming, not on real recordings.
+- **Add to the page**: chord names above each bar and note names under the tune, as text boxes you can move or correct. The chords are marked as chords, so transposing changes them.
+- **Make a chord and tab sheet**: a new typed song with, for each line of music, the chords, the note names and the tab. The tab is kept in `{start_of_tab}` blocks and set in a fixed-width font so the strings line up. The original is not changed.
 
-Nothing is sent anywhere: the sound is analysed on the PC and is not kept after the window closes. The microphone is the only device ChartShift ever asks for, and only for this; the camera and everything else stay refused.
+What to expect:
+
+- It is made for clean printed music. Hand-written music, very small print and photos taken at an angle may not read well. Scans are straightened when they are opened, and the reader allows for a slight tilt, speckle and blur.
+- The chords are a suggestion worked out from the notes. If the music already prints its chord names, **Rescan for chords** reads those instead.
+- Lyrics, rests, ties, repeats, grace notes and tuplets are not read; the tab follows the tune only and is written in the music's key (it does not change when you transpose).
+- It has been tested on engraved test pages (a four-part hymn, a tune with words in F, a waltz, guitar music), clean and made to look scanned. It has not yet been tried on a real scanned book page.
 
 ## Updating
 
@@ -138,7 +141,7 @@ Saving as PDF always keeps each page's own size.
 - `src/lib/textlayer.js`, `src/lib/ocr.js` – match recognised words (PDF text or Tesseract OCR) to pieces and mark chords.
 - `src/lib/chords.js`, `src/lib/chordpro.js`, `src/lib/layout.js` – chord maths, ChordPro, fit/enlarge.
 - `src/editor/` – `store.js` (pages, selection, tools, undo), `sections.js`, `music.js`, `writing.js` (written songs: text in, pages out).
-- `src/lib/audioChords.js` (chords from sound: note strengths per moment, matched to chord patterns, smoothed over time), `src/lib/audioInput.js` (decoding and microphone), `src/ListenDialog.jsx`.
+- `src/lib/omr.js` (reading printed music: staff lines found and removed, then note heads, stems, beams, clefs, key signatures, accidentals and bar lines), `src/lib/sheet.js` (bars, beats, the tune and a chord per bar), `src/lib/tab.js` (frets for the tune, and the chord-and-tab sheet), `src/editor/sheetmusic.js`, `src/SheetMusicDialog.jsx`. Tested against pages engraved by Verovio (`test/helpers/engrave.mjs`); `node scripts/omr-debug.mjs <tune.abc|piece.mjs|page.png>` draws what was found.
 - `src/lib/songtext.js` (song text: structure, syllables, transposing), `src/lib/diagrams.js` (chord shapes, each checked by a test against the notes it should sound), `src/WriteTab.jsx`.
 - `src/App.jsx` (shell: title bar, editing toolbar, welcome screen), `src/PageView.jsx` (one page), `src/Inspector.jsx` (Sections / Chords / Page tabs), `src/dialogs.jsx`, `src/ui.jsx` (shared controls), `src/icons.jsx`, `src/styles.css` (design tokens) – the UI.
 - `src/lib/exporter.js` – flattens pages at 300 dpi into a PDF (pdf-lib) or into images for printing.

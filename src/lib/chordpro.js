@@ -3,7 +3,7 @@
 import { isChord, isChordLine, isNeutral } from './chords.js';
 import { chordTokens } from './textlayer.js';
 import { guttersOfPages, inColumns, median, rowsOf } from './rows.js';
-import { LINE_HEIGHT, measureText } from './text.js';
+import { FONTS, LINE_HEIGHT, measureText } from './text.js';
 import { DIAGRAM_SIZE, shapeFor } from './diagrams.js';
 
 // Words that name a part of a song.
@@ -53,10 +53,13 @@ export function headingOf(line) {
 
 export function parseChordPro(source) {
   const song = { title: '', subtitle: '', key: '', capo: '', tempo: '', time: '', lines: [] };
+  let inTab = false;
   for (const raw of source.replace(/\r/g, '').split('\n')) {
     const line = raw.trimEnd();
     if (line.startsWith('#')) continue;
     const directive = line.match(/^\s*\{([^:}]+)(?::\s*(.*?))?\s*\}\s*$/);
+    // Inside a tab block every line is kept exactly as typed, spaces and all.
+    if (inTab && !directive) { song.lines.push(line.trim() ? { type: 'tab', text: line } : { type: 'blank' }); continue; }
     if (directive) {
       const name = directive[1].trim().toLowerCase();
       const value = directive[2] || '';
@@ -71,7 +74,8 @@ export function parseChordPro(source) {
         const kind = name.replace(/^start_of_/, '').replace(/^so/, '');
         const label = value || { chorus: 'Chorus', c: 'Chorus', verse: 'Verse', v: 'Verse', bridge: 'Bridge', b: 'Bridge', tab: 'Tab', t: 'Tab' }[kind] || 'Section';
         song.lines.push({ type: 'start', label });
-      } else if (/^(end_of_|eo)/.test(name)) song.lines.push({ type: 'end' });
+        inTab = kind === 'tab' || kind === 't';
+      } else if (/^(end_of_|eo)/.test(name)) { song.lines.push({ type: 'end' }); inTab = false; }
       continue;
     }
     if (!line.trim()) { song.lines.push({ type: 'blank' }); continue; }
@@ -97,6 +101,21 @@ export function parseChordPro(source) {
 }
 
 const GUTTER = 28;
+const MONO = FONTS.find((f) => f.label.startsWith('Courier')).css;
+
+// A line of a tab block: the text without ChordPro brackets, and the chords
+// with the column each one starts at.
+function tabLine(text) {
+  let plain = '';
+  const chords = [];
+  for (const part of text.split(/(\[[^\]]+\])/)) {
+    if (/^\[[^\]]+\]$/.test(part)) {
+      chords.push({ column: plain.length, name: part.slice(1, -1) });
+      plain += ' '.repeat(part.length - 2);
+    } else plain += part;
+  }
+  return { plain, chords };
+}
 const textWidth = (text) => measureText({ text, font: SANS, size: 12 }).w;
 
 // Breaks a line that is too wide for its column at a space, keeping each
@@ -178,7 +197,30 @@ export function layoutChordPro(song, ids, { diagrams = null, columns = 1 } = {})
   }
   top = y;
 
+  // Tab is set in a fixed-width font, small enough for the longest tab line
+  // to fit the column, so the strings and bar lines stay lined up.
+  const longest = Math.max(1, ...song.lines.filter((l) => l.type === 'tab').map((l) => tabLine(l.text).plain.trimEnd().length));
+  const charWidth = (size) => measureText({ text: 'M'.repeat(10), font: MONO, size }).w / 10;
+  let tabSize = 10;
+  while (tabSize > 5 && charWidth(tabSize) * longest > columnWidth) tabSize -= 0.5;
+  const tabChar = charWidth(tabSize);
+
   for (const line of song.lines) {
+    if (line.type === 'tab') {
+      const { plain, chords } = tabLine(line.text);
+      room(tabSize * 1.25);
+      for (const chord of chords) {
+        add(chord.name, left() + chord.column * tabChar, y, { font: MONO, size: tabSize, bold: true, color: CHORD_COLOR, ...(isChord(chord.name) ? { chord: true } : null) });
+      }
+      // Whatever is left once the chords are taken out: note names, strings, bar lines.
+      const rest = plain.replace(/\s+$/, '');
+      if (rest.trim()) {
+        const lead = rest.length - rest.trimStart().length;
+        add(rest.trimStart(), left() + lead * tabChar, y, { font: MONO, size: tabSize });
+      }
+      y += tabSize * 1.25;
+      continue;
+    }
     if (line.type === 'blank') { if (!atTop()) y += 10; if (section?.implicit) section = null; continue; }
     if (line.type === 'end') { section = null; if (!atTop()) y += 6; continue; }
     if (line.type === 'start' || line.type === 'heading') {

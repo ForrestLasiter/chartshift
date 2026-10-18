@@ -21,33 +21,6 @@ async function capture(win) {
   }
 }
 
-// Page-side code that builds a short WAV of strummed chords (G C D Em C G), for exercising
-// "Chords from a recording" without a microphone.
-const SYNTH_WAV = `(() => {
-        const rate = 22050, voicings = { G: [43, 47, 50, 55, 59, 67], C: [48, 52, 55, 60, 64], D: [50, 57, 62, 66], Em: [40, 47, 52, 55, 59, 64] };
-        const song = ['G', 'C', 'D', 'Em', 'C', 'G'], each = 2 * rate;
-        const pcm = new Int16Array(song.length * each);
-        song.forEach((name, n) => {
-          for (const [k, midi] of voicings[name].entries()) {
-            const hz = 440 * 2 ** ((midi - 69) / 12);
-            for (let i = 0; i < each; i++) {
-              const t = i / rate, since = (t % 0.5) - k * 0.012;
-              if (since < 0) continue;
-              let v = 0;
-              for (let h = 1; h <= 5; h++) v += 0.6 ** (h - 1) * Math.sin(2 * Math.PI * hz * h * t);
-              pcm[n * each + i] += 2200 * Math.exp(-since * 3) * v;
-            }
-          }
-        });
-        const bytes = new Uint8Array(44 + pcm.length * 2), view = new DataView(bytes.buffer);
-        const tag = (at, text) => [...text].forEach((ch, i) => view.setUint8(at + i, ch.charCodeAt(0)));
-        tag(0, 'RIFF'); view.setUint32(4, 36 + pcm.length * 2, true); tag(8, 'WAVEfmt '); view.setUint32(16, 16, true);
-        view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true);
-        view.setUint16(32, 2, true); view.setUint16(34, 16, true); tag(36, 'data'); view.setUint32(40, pcm.length * 2, true);
-        new Int16Array(bytes.buffer, 44).set(pcm);
-        return bytes;
-      })()`;
-
 function whenSampleOpens(win, run) {
   const fail = setTimeout(() => { console.error('HARNESS FAIL: sample did not open'); app.exit(1); }, 60000);
   let started = false;
@@ -320,33 +293,9 @@ function runSmoke(win, { output, withPrintWindow, preload, pretendVersion }) {
       await window.chartshift.library.remove('Morning Song').catch(() => {});
       out.writing = w;
 
-      // Chords from a recording: a synthesised strummed G C D Em as a WAV file.
-      const wav = ${SYNTH_WAV};
-      window.__testAudio = wav;
-      const l = {};
-      more.click(); await sleep(150);
-      [...document.querySelectorAll('[role=menuitem]')].find((x) => x.textContent.includes('Chords from a recording')).click(); await sleep(300);
-      l.title = document.querySelector('dialog[open] h2').textContent;
-      l.startUnnamed = [...document.querySelectorAll('dialog[open] button')].filter((el) => !named(el)).length;
-      press('Choose an audio file…', document.querySelector('dialog[open]'));
-      for (let i = 0; i < 100 && !document.querySelector('.chord-timeline, dialog[open] .error'); i++) await sleep(200);
-      l.error = document.querySelector('dialog[open] .error')?.textContent || null;
-      l.chips = [...document.querySelectorAll('.chord-chip strong')].map((x) => x.textContent);
-      l.times = [...document.querySelectorAll('.chord-chip span')].map((x) => x.textContent);
-      l.summary = document.querySelector('dialog[open] .fact')?.textContent;
-      l.text = document.querySelector('.listen-text')?.value;
-      l.hasPlayer = !!document.querySelector('dialog[open] audio[src^="blob:"]');
-      l.resultUnnamed = [...document.querySelectorAll('dialog[open] button')].filter((el) => !named(el)).length + [...document.querySelectorAll('dialog[open] select, dialog[open] textarea')].filter((el) => !labelled(el)).length;
-      l.canAppend = !![...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Add to the end of this song');
-      press('Add to the end of this song', document.querySelector('dialog[open]')); await sleep(300);
-      l.appended = S().write.text.trimEnd().endsWith('[G] [C] [D] [Em]\\n[C] [G]');
-      l.onPage = S().pages.flatMap((pg) => pg.pieces.filter((q) => q.chord && q.kind === 'text').map((q) => q.text)).slice(-6);
-      l.closed = !document.querySelector('dialog[open]');
-      // Microphone: only sound, only for this page; the camera stays refused.
+      // The app asks for no devices: the camera and the microphone are both refused.
       const ask = async (constraints) => { try { const stream = await navigator.mediaDevices.getUserMedia(constraints); stream.getTracks().forEach((t) => t.stop()); return 'granted'; } catch (e) { return e.name; } };
-      l.camera = await ask({ video: true });
-      l.microphone = await ask({ audio: true });
-      out.listening = l;
+      out.devices = { camera: await ask({ video: true }), microphone: await ask({ audio: true }) };
 
       // Updates: the real check against GitHub (this needs the internet), and the window for it.
       const u = {};
@@ -373,6 +322,58 @@ function runSmoke(win, { output, withPrintWindow, preload, pretendVersion }) {
       return out;
     } catch (error) { return { pageError: String(error && error.stack || error) }; } })()`);
     if (report.pageError) throw new Error('in-page checks failed: ' + report.pageError);
+
+    // Sheet music: a chord chart has no staffs to read; an engraved hymn
+    // (handed in by the smoke run) gives chords, note names and guitar tab.
+    const sheetPng = process.env.CHARTSHIFT_SHEET ? (await fs.readFile(process.env.CHARTSHIFT_SHEET)).toString('base64') : '';
+    report.sheet = await page(`(async () => { try {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const S = () => __editor.getState();
+      const idle = async () => { await sleep(100); for (let i = 0; i < 1200 && document.querySelector('.busy'); i++) await sleep(50); await sleep(250); };
+      const dialog = () => document.querySelector('dialog[open]');
+      const press = (name, scope = document) => { const el = [...scope.querySelectorAll('button, [role=tab], [role=menuitem]')].find((x) => (x.getAttribute('aria-label') || x.textContent.trim()) === name); if (!el) throw new Error('no control named ' + name); el.click(); };
+      const menu = async (item) => { press('More file actions'); await sleep(200); press(item); await idle(); };
+      const named = (el) => (el.getAttribute('aria-label') || el.textContent || '').trim().length > 0;
+      const labelled = (el) => !!(el.getAttribute('aria-label') || el.closest('label') || (el.id && document.querySelector('label[for="' + el.id + '"]')));
+      window.confirm = () => true;
+      const r = {};
+      await menu('Open the sample chart');
+      await menu('Read sheet music…');
+      r.empty = { title: dialog()?.querySelector('h2')?.textContent, text: dialog()?.querySelector('.fact')?.textContent };
+      press('Close', dialog()); await sleep(250);
+      const png = ${JSON.stringify(sheetPng)};
+      if (!png) return r;
+      await window.__openFile('Old Hundredth.png', Uint8Array.from(atob(png), (c) => c.charCodeAt(0)));
+      await idle();
+      r.pages = S().pages.length;
+      await menu('Read sheet music…');
+      const d = dialog();
+      r.summary = d.querySelector('.fact')?.textContent;
+      r.lines = [...d.querySelectorAll('.sheet-lines li')].map((li) => li.textContent);
+      r.preview = d.querySelector('.tab-preview')?.textContent || '';
+      r.boxes = [...d.querySelectorAll('input[type=checkbox]')].map((x) => x.checked);
+      r.unnamed = [...d.querySelectorAll('button')].filter((el) => !named(el)).length + [...d.querySelectorAll('input')].filter((el) => !labelled(el)).length;
+      press('Add to the page', d); await sleep(300);
+      const texts = () => S().pages[0].pieces.filter((p) => p.kind === 'text');
+      r.chords = texts().filter((p) => p.chord).map((p) => p.text);
+      r.notes = texts().filter((p) => !p.chord).map((p) => p.text);
+      r.status = document.querySelector('[role=status]').textContent;
+      __editor.transpose(2); await sleep(200);
+      r.transposed = texts().filter((p) => p.chord).map((p) => p.text);
+      await menu('Read sheet music…');
+      press('Make a chord and tab sheet', dialog()); await idle();
+      const st = S();
+      r.written = !!st.write;
+      r.name = st.name;
+      r.tabBlocks = (st.write.text.match(/\\{start_of_tab/g) || []).length;
+      const pieces = st.pages[0].pieces.filter((p) => p.kind === 'text');
+      const strings = pieces.filter((p) => /^[eBGDAE]\\|/.test(p.text)).slice(0, 6);
+      r.strings = strings.map((p) => p.text.slice(0, 2));
+      r.stringsLinedUp = strings.length === 6 && strings.every((p) => Math.abs(p.x - strings[0].x) < 0.01 && /Courier/.test(p.font) && p.w === strings[0].w);
+      r.sheetChords = pieces.filter((p) => p.chord).length;
+      return r;
+    } catch (error) { return { pageError: String(error && error.stack || error) }; } })()`);
+    if (report.sheet.pageError) throw new Error('sheet music checks failed: ' + report.sheet.pageError);
 
     // Navigation away from the app is refused.
     await page(`location.href = 'https://example.com/'; 0`).catch(() => {});
@@ -555,17 +556,25 @@ const SCENES = [
   ['17-back-to-sample', `
     document.querySelector('.inspector [role=tab]').click();
     await __h.sleep(100);`],
-  ['18-listen-start', `
+  // Sheet music: the test hymn is handed in as window.__sheetPng (base64) by runShots.
+  ['18-sheet-music', `
+    window.confirm = () => true;
+    await window.__openFile('Old Hundredth.png', Uint8Array.from(atob(window.__sheetPng), (c) => c.charCodeAt(0)));
+    await __h.idle();
     await __h.press('More file actions');
-    [...document.querySelectorAll('[role=menuitem]')].find((x) => x.textContent.includes('Chords from a recording')).click();
-    await __h.sleep(300);`],
-  ['19-listen-result', `
-    window.__testAudio = ${SYNTH_WAV};
-    await __h.press('Choose an audio file…', document.querySelector('dialog[open]'));
-    for (let i = 0; i < 100 && !document.querySelector('.chord-timeline'); i++) await __h.sleep(200);
-    const audio = document.querySelector('dialog[open] audio');
-    audio.currentTime = 4.5;
-    await __h.sleep(400);`],
+    [...document.querySelectorAll('[role=menuitem]')].find((x) => x.textContent.includes('Read sheet music')).click();
+    await __h.idle();`],
+  ['19-sheet-labels', `
+    await __h.press('Add to the page', document.querySelector('dialog[open]'));
+    __editor.set({ selection: new Set() });
+    await __h.press('Fit');`],
+  ['20-tab-sheet', `
+    await __h.press('More file actions');
+    [...document.querySelectorAll('[role=menuitem]')].find((x) => x.textContent.includes('Read sheet music')).click();
+    await __h.idle();
+    await __h.press('Make a chord and tab sheet', document.querySelector('dialog[open]'));
+    await __h.idle();
+    await __h.press('Fit');`],
 ];
 
 function runShots(win, { folder }) {
@@ -573,6 +582,8 @@ function runShots(win, { folder }) {
   whenSampleOpens(win, async () => {
     const page = (code) => win.webContents.executeJavaScript(`(async () => { ${code} })()`);
     const failures = [];
+    // Screenshots run from the source tree, where the test pictures are.
+    const sheetPng = (await fs.readFile(path.join(__dirname, '..', 'test', 'fixtures', 'old-hundredth.png'))).toString('base64');
     // A library with some believable songs, so lists are not empty.
     await page(`
       const lib = window.chartshift.library, blank = new Uint8Array([80, 75, 5, 6]);
@@ -593,6 +604,7 @@ function runShots(win, { folder }) {
       await opened;
       await sleep(700);
       await page(PAGE_HELPERS);
+      await page(`window.__sheetPng = ${JSON.stringify(sheetPng)};`);
       for (const [name, code] of SCENES) {
         try {
           await page(`await __h.idle(); ${code} await __h.idle();`);

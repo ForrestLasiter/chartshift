@@ -15,6 +15,7 @@ const META_NAMES = { title: 'title', t: 'title', subtitle: 'artist', st: 'artist
 export function splitChordPro(source) {
   const meta = { ...EMPTY_META };
   const body = [];
+  let inTab = false;
   for (const line of String(source).replace(/\r/g, '').split('\n')) {
     const directive = line.match(DIRECTIVE);
     const name = directive && META_NAMES[directive[1].trim().toLowerCase()];
@@ -25,10 +26,12 @@ export function splitChordPro(source) {
       if (/^(comment|c|ci|comment_italic)$/.test(key)) { body.push(directive[2] || ''); continue; }
       if (/^(start_of_|so)/.test(key)) {
         const kind = key.replace(/^start_of_/, '').replace(/^so/, '');
+        // Tab blocks stay as they are: inside one, spacing lines the strings up.
+        if (kind === 'tab' || kind === 't') { inTab = true; body.push(line.trim()); continue; }
         body.push(directive[2] || { chorus: 'Chorus', c: 'Chorus', verse: 'Verse', v: 'Verse', bridge: 'Bridge', b: 'Bridge' }[kind] || 'Section');
         continue;
       }
-      if (/^(end_of_|eo)/.test(key)) continue;
+      if (/^(end_of_|eo)/.test(key)) { if (inTab) body.push(line.trim()); inTab = false; continue; }
     }
     body.push(line);
   }
@@ -83,6 +86,9 @@ export function chordsUsed(text) {
 
 // --- structure ---------------------------------------------------------------
 
+// "{start_of_tab: Line 1}" starts a block of tab, which counts as a section.
+const tabLabel = (line) => { const m = line.match(/^\s*\{(?:start_of_tab|sot)(?::\s*(.*?))?\s*\}\s*$/i); return m ? m[1] || 'Tab' : null; };
+
 /**
  * The song as an intro (anything before the first heading) and its sections.
  * Each section is { label, lines } where lines[0] is the heading line itself.
@@ -91,7 +97,7 @@ export function parseStructure(text) {
   const intro = [];
   const sections = [];
   for (const line of text.split('\n')) {
-    const label = headingOf(line);
+    const label = headingOf(line) || tabLabel(line);
     if (label) sections.push({ label, lines: [line] });
     else if (sections.length) sections[sections.length - 1].lines.push(line);
     else intro.push(line);
