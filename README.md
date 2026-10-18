@@ -56,7 +56,7 @@ A chart opened from a PDF can be turned into a written song with **Turn this cha
 
 ## Reading sheet music
 
-Printed music from a hymnal, songbook or method book can be turned into chords and guitar tab. Open the PDF or a scan of the page, then choose **Read sheet music…** on the Chords tab (or the More menu).
+Printed music from a hymnal, songbook or method book can be turned into chords and guitar tab. This includes clear page photos and seven-shape shape-note books. Open the PDF, scan or photo of the page, then choose **Read sheet music…** on the Chords tab (or the More menu).
 
 ChartShift finds the staffs and reads the notes on them: note heads (filled, half and whole), stems, beams, flags and dots, treble and bass clefs (and the guitar clef with an 8 under it), key signatures, sharps, flats and naturals, bar lines and time signatures. From the notes it works out:
 
@@ -70,12 +70,12 @@ Then either:
 - **Add to the page**: chord names above each bar and note names under the tune, as text boxes you can move or correct. The chords are marked as chords, so transposing changes them.
 - **Make a chord and tab sheet**: a new typed song with, for each line of music, the chords, the note names and the tab. The tab is kept in `{start_of_tab}` blocks and set in a fixed-width font so the strings line up. The original is not changed.
 
-What to expect:
+What to expect: it works best with a clear, complete page where the staves and note heads are visible. Strong shadows, blur, page folds, cropped staffs, dense or unusual notation, and overlapping parts can still lead to missed or misplaced notes. Shape names do not determine pitch; the reader uses each head's position on the staff. Check the generated chords, note names and tab against the page before using them.
 
-- It is made for clean printed music. Hand-written music, very small print and photos taken at an angle may not read well. Scans are straightened when they are opened, and the reader allows for a slight tilt, speckle and blur.
+- It reads printed music; hand-written music, very small print and sharply angled photos may not read well. Scans are straightened when they are opened, and the reader allows for some tilt, speckle and blur.
 - The chords are a suggestion worked out from the notes. If the music already prints its chord names, **Rescan for chords** reads those instead.
 - Lyrics, rests, ties, repeats, grace notes and tuplets are not read; the tab follows the tune only and is written in the music's key (it does not change when you transpose).
-- It has been tested on engraved test pages (a four-part hymn, a tune with words in F, a waltz, guitar music), clean and made to look scanned. It has not yet been tried on a real scanned book page.
+- It has been tested on engraved test pages (a four-part hymn, a tune with words in F, a waltz, guitar music, and seven-shape notes), clean and made to look scanned or photographed, and inspected on a photographed hymnal page. It has not yet been tested on a real scanned book page.
 
 ## Updating
 

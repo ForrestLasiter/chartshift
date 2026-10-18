@@ -10,7 +10,7 @@ const SHAPES = [
   { quality: 'm', tones: [0, 3, 7], cost: 0 },
   { quality: '7', tones: [0, 4, 7, 10], cost: 0.1 },
   { quality: 'm7', tones: [0, 3, 7, 10], cost: 0.14 },
-  { quality: 'maj7', tones: [0, 4, 7, 11], cost: 0.2 },
+  { quality: 'maj7', tones: [0, 4, 7, 11], cost: 0.5 },
   { quality: 'sus4', tones: [0, 5, 7], cost: 0.16 },
   { quality: 'dim', tones: [0, 3, 6], cost: 0.22 },
 ];
@@ -46,7 +46,7 @@ export function bestChord(notes, { key, bass = null, previous = null, melodyOnly
       for (const pc of tones) inside += weight[pc];
       const outside = total - inside;
       // A seventh (or other added note) has to be heard to be suggested.
-      if (shape.tones.length > 3 && weight[(root + shape.tones[3]) % 12] < 0.15 * total) continue;
+      if (shape.tones.length > 3 && weight[(root + shape.tones[3]) % 12] < 0.2 * total) continue;
       if (shape.quality === 'sus4' && weight[(root + 5) % 12] < 0.2 * total) continue;
       let score = inside - 0.75 * outside - shape.cost * total;
       if (!weight[root]) score -= 0.25 * total;
@@ -87,7 +87,9 @@ function onsetsOf(notes, space) {
 // staff holds two parts (stems up and stems down), only the upper part counts.
 function melodyOf(onsets, topStaff) {
   const mine = onsets.map((o) => o.notes.filter((n) => n.staff === topStaff));
-  const twoParts = mine.some((list) => list.some((n) => n.stem === 'up') && list.some((n) => n.stem === 'down'));
+  // Two parts on one staff have stems of their own, up and down. (In some
+  // books both parts hang on one stem; then it is one part in chords.)
+  const twoParts = mine.some((list) => list.some((n) => n.stem === 'up' && list.some((m) => m.stem === 'down' && m.stemX !== n.stemX)));
   const melody = [];
   mine.forEach((list, i) => {
     const voice = twoParts ? list.filter((n) => n.stem !== 'down') : list;

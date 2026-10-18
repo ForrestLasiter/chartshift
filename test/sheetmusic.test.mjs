@@ -159,3 +159,21 @@ test('a tab sheet stays a tab sheet as a typed song: blocks kept, laid out, one 
   // Transposing a typed song changes the chords written in the tab blocks.
   assert.match(transposeText(text, 2, false), /\[A\]/);
 });
+
+test('a photographed page (bowed paper, a hand\'s shadow, a slight turn) is still read', async () => {
+  const photo = { photo: true, blur: 1, noise: 0.4 };
+  for (const [piece, need] of [[WALTZ_ABC, 1], [TERRA_BEATA, 0.95], [OLD_HUNDREDTH, 0.95]]) {
+    const { result, truth } = await read(piece, photo);
+    const s = score(result, truth);
+    assert.ok(s.recall >= need && s.precision >= need, JSON.stringify(s));
+  }
+});
+
+test('shape notes (seven-shape heads) are read by where they sit, whatever their shape', async () => {
+  // Floors, not goals: small diamonds and some filled squares are still missed (see HANDOFF.md).
+  for (const [piece, tonic, need] of [[WALTZ_ABC, 7, 0.75], [TERRA_BEATA, 5, 0.9], [OLD_HUNDREDTH, 7, 0.85]]) {
+    const { result, truth } = await read(piece, { shapes: tonic });
+    const s = score(result, truth);
+    assert.ok(s.recall >= need && s.precision >= 0.95, JSON.stringify(s));
+  }
+});

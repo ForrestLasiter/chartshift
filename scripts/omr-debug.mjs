@@ -2,7 +2,6 @@
 //   node scripts/omr-debug.mjs <tune.abc|piece.mjs|page.png> [out.png]
 // Writes a picture with the found staffs, bar lines and notes marked.
 import fs from 'node:fs';
-import zlib from 'node:zlib';
 import { Resvg } from '@resvg/resvg-js';
 import { readMusic } from '../src/lib/omr.js';
 import { analyse } from '../src/lib/sheet.js';
@@ -10,14 +9,12 @@ import { sheetText } from '../src/lib/tab.js';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { engrave, mei } from '../test/helpers/engrave.mjs';
+import { pngBytes, readPng } from '../test/helpers/png.mjs';
 
 const [file, out = 'omr-debug.png'] = process.argv.slice(2);
 let img, truth = null;
 if (/\.png$/i.test(file)) {
-  const r = new Resvg(`<svg xmlns="http://www.w3.org/2000/svg"><image href="data:image/png;base64,${fs.readFileSync(file).toString('base64')}"/></svg>`);
-  const { width, height } = r.innerBBox() || {};
-  const page = new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><image width="${width}" height="${height}" href="data:image/png;base64,${fs.readFileSync(file).toString('base64')}"/></svg>`, { background: 'white' }).render();
-  img = { data: new Uint8ClampedArray(page.pixels), width: page.width, height: page.height };
+  img = readPng(file);
 } else {
   const source = fs.readFileSync(file, 'utf8');
   const options = JSON.parse(process.env.ENGRAVE || '{}');
@@ -34,7 +31,12 @@ if (music.debug) {
   const { sym, width, height } = music.debug;
   const data = new Uint8ClampedArray(width * height * 4);
   for (let i = 0; i < sym.length; i++) { const v = sym[i] ? 0 : 255; data.set([v, v, v, 255], i * 4); }
-  fs.writeFileSync(process.env.OMR_SYM, rgbaToPng({ data, width, height }));
+  fs.writeFileSync(process.env.OMR_SYM, pngBytes({ data, width, height }));
+  if (process.env.OMR_INK) {
+    const ink = new Uint8ClampedArray(width * height * 4);
+    for (let i = 0; i < music.debug.ink.length; i++) { const v = music.debug.ink[i] ? 0 : 255; ink.set([v, v, v, 255], i * 4); }
+    fs.writeFileSync(process.env.OMR_INK, pngBytes({ data: ink, width, height }));
+  }
 }
 console.log(`read in ${Date.now() - t0} ms; slope ${music.slope.toFixed(4)}`);
 for (const s of music.staffs) console.log(`staff ${s.index}: space ${s.space.toFixed(1)} clef ${s.clef} fifths ${s.fifths} bars ${s.bars.map(Math.round).join(',')} header ${Math.round(s.headerEnd)}`);
@@ -60,28 +62,10 @@ for (const s of music.staffs) {
   marks.push(`<line x1="${s.headerEnd}" x2="${s.headerEnd}" y1="${s.lines[0]}" y2="${s.lines[4]}" stroke="orange" stroke-width="3"/>`);
 }
 for (const n of music.notes) {
-  marks.push(`<circle cx="${n.x}" cy="${n.y}" r="9" fill="none" stroke="red" stroke-width="3"/>`);
-  marks.push(`<text x="${n.x - 10}" y="${n.y + 40 * (n.stem === 'up' ? 1 : -0.6)}" font-size="22" fill="red" font-family="Arial">${n.name}${n.octave}·${n.duration}</text>`);
+  marks.push(`<circle cx="${n.x}" cy="${n.y}" r="6" fill="none" stroke="red" stroke-width="2"/>`);
+  marks.push(`<text x="${n.x + 12}" y="${n.y + 7}" font-size="20" fill="red" font-family="Arial" stroke="white" stroke-width="4" paint-order="stroke">${n.name}${n.octave}</text>`);
 }
-const b64 = rgbaToPng(img).toString('base64');
+const b64 = pngBytes(img).toString('base64');
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${img.width}" height="${img.height}"><image width="${img.width}" height="${img.height}" href="data:image/png;base64,${b64}"/>${marks.join('')}</svg>`;
 fs.writeFileSync(out, new Resvg(svg, { font: { loadSystemFonts: true } }).render().asPng());
 console.log('wrote', out);
-
-// Minimal PNG encoder for the overlay background.
-function rgbaToPng({ data, width, height }) {
-  const raw = Buffer.alloc((width * 4 + 1) * height);
-  for (let y = 0; y < height; y++) {
-    raw[y * (width * 4 + 1)] = 0;
-    Buffer.from(data.buffer, data.byteOffset + y * width * 4, width * 4).copy(raw, y * (width * 4 + 1) + 1);
-  }
-  const chunk = (type, body) => {
-    const len = Buffer.alloc(4); len.writeUInt32BE(body.length);
-    const td = Buffer.concat([Buffer.from(type), body]);
-    const crc = Buffer.alloc(4); crc.writeUInt32BE(zlib.crc32(td) >>> 0);
-    return Buffer.concat([len, td, crc]);
-  };
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0); ihdr.writeUInt32BE(height, 4); ihdr[8] = 8; ihdr[9] = 6;
-  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
-}

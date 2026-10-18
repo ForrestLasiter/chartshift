@@ -33,23 +33,68 @@ function otsu(hist, total) {
   return threshold + 1;
 }
 
-// Black-and-white version of the page: 1 = ink.
-function inkOf({ data, width: W, height: H }) {
-  const N = W * H;
-  const v = new Uint8Array(N);
-  const hist = new Uint32Array(256);
-  for (let i = 0, p = 0; i < N; i++, p += 4) {
+// Darkness of each pixel (the darkest channel, so coloured ink counts).
+function greyOf({ data, width: W, height: H }) {
+  const v = new Uint8Array(W * H);
+  for (let i = 0, p = 0; i < v.length; i++, p += 4) {
     const a = data[p + 3];
     let m = Math.min(data[p], data[p + 1], data[p + 2]);
     if (a < 255) m = Math.round((m * a + 255 * (255 - a)) / 255);
     v[i] = m;
-    hist[m]++;
   }
+  return v;
+}
+
+// Black-and-white version of the page (1 = ink), from one threshold for the
+// whole page: right for clean, evenly lit pages.
+function inkOf(v) {
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < v.length; i++) hist[v[i]]++;
   let bg = 255, peak = 0;
   for (let i = 128; i < 256; i++) if (hist[i] >= peak) { peak = hist[i]; bg = i; }
-  const T = Math.min(otsu(hist, N), bg - 24);
-  const ink = new Uint8Array(N);
-  for (let i = 0; i < N; i++) if (v[i] < T) ink[i] = 1;
+  const T = Math.min(otsu(hist, v.length), bg - 24);
+  const ink = new Uint8Array(v.length);
+  for (let i = 0; i < v.length; i++) if (v[i] < T) ink[i] = 1;
+  return ink;
+}
+
+// Running maximum (or minimum) over 2r+1 values along rows or columns.
+function sweep(src, W, H, r, horizontal, max) {
+  const out = new Uint8Array(src.length);
+  const len = horizontal ? W : H, lines = horizontal ? H : W;
+  const step = horizontal ? 1 : W, next = horizontal ? W : 1;
+  const queue = new Int32Array(len);
+  for (let l = 0; l < lines; l++) {
+    const base = l * next;
+    let head = 0, tail = 0;
+    for (let i = 0; i < len + r; i++) {
+      if (i < len) {
+        const value = src[base + i * step];
+        while (tail > head && (max ? src[base + queue[tail - 1] * step] <= value : src[base + queue[tail - 1] * step] >= value)) tail--;
+        queue[tail++] = i;
+      }
+      const at = i - r;
+      if (at < 0) continue;
+      while (queue[head] < at - r) head++;
+      out[base + at * step] = src[base + queue[head] * step];
+    }
+  }
+  return out;
+}
+
+// The paper's own brightness around each pixel: ink strokes (anything
+// narrower than about a note head) are closed over, while large areas such
+// as a hand's shadow on a photographed page keep their level and edges.
+function paperOf(v, W, H, r) {
+  const lighter = sweep(sweep(v, W, H, r, true, true), W, H, r, false, true);
+  return sweep(sweep(lighter, W, H, r, true, false), W, H, r, false, false);
+}
+
+// Ink is what is clearly darker than the paper around it, so shadows and
+// uneven light are not taken for ink.
+function inkAgainst(v, paper) {
+  const ink = new Uint8Array(v.length);
+  for (let i = 0; i < v.length; i++) if (v[i] < paper[i] - Math.max(28, 0.24 * paper[i])) ink[i] = 1;
   return ink;
 }
 
@@ -97,6 +142,135 @@ function straightened(ink, W, H, slope) {
     const shift = Math.round(x * slope);
     for (let y = 0; y < H; y++) {
       const sy = y + shift;
+      if (sy >= 0 && sy < H && ink[sy * W + x]) out[y * W + x] = 1;
+    }
+  }
+  return out;
+}
+
+// How each staff bends across the page (a photographed book page is rarely
+// flat). The staffs are found in narrow upright strips, followed from strip
+// to strip, and the result is a vertical shift for every column and height
+// that straightens them. Returns null when there is nothing to straighten.
+function bendOf(ink, W, H, period) {
+  const strips = Math.max(6, Math.min(24, Math.round(W / (7 * period))));
+  const width = W / strips;
+  const found = [];
+  for (let k = 0; k < strips; k++) {
+    const x0 = Math.round(k * width), x1 = Math.round((k + 1) * width);
+    const xc = (x0 + x1) / 2;
+    // Within a strip the lines can still slope (a strongly bowed page), so
+    // the strip is tried at a few slopes and the one that gives the sharpest
+    // lines is used; heights are then as at the strip's middle.
+    let amount = null, sharpest = -1;
+    for (let t = -0.06; t <= 0.0601; t += 0.01) {
+      const rows = new Float64Array(H);
+      for (let x = x0; x < x1; x++) {
+        const shift = Math.round((x - xc) * t);
+        for (let y = Math.max(0, shift); y < Math.min(H, H + shift); y++) if (ink[y * W + x]) rows[y - shift]++;
+      }
+      let sum = 0;
+      for (let y = 0; y < H; y++) sum += rows[y] * rows[y];
+      if (sum > sharpest) { sharpest = sum; amount = rows; }
+    }
+    let max = 0;
+    for (let y = 0; y < H; y++) if (amount[y] > max) max = amount[y];
+    const lines = [];
+    let cur = null;
+    for (let y = 0; y < H; y++) {
+      if (amount[y] >= Math.max(0.45 * max, 0.3 * (x1 - x0))) {
+        if (cur && y - cur.y1 <= 2) { cur.y1 = y; cur.sum += amount[y] * y; cur.w += amount[y]; }
+        else { cur = { y0: y, y1: y, sum: amount[y] * y, w: amount[y] }; lines.push(cur); }
+      }
+    }
+    const ys = lines.map((L) => L.sum / L.w);
+    // Every run of five evenly spaced lines is a candidate; where they
+    // overlap (a row of notes or a line of words can look like a sixth
+    // line), the five strongest lines win.
+    const candidates = [];
+    for (let i = 0; i + 4 < ys.length; i++) {
+      const gaps = [1, 2, 3, 4].map((j) => ys[i + j] - ys[i + j - 1]);
+      const mean = (ys[i + 4] - ys[i]) / 4;
+      if (gaps.every((g) => g > 0.75 * mean && g < 1.25 * mean) && mean > 0.85 * period && mean < 1.2 * period) {
+        candidates.push({ mid: (ys[i] + ys[i + 4]) / 2, mean, strength: lines.slice(i, i + 5).reduce((sum, L) => sum + L.w, 0) });
+      }
+    }
+    candidates.sort((a, b) => b.strength - a.strength);
+    const staffs = [];
+    for (const c of candidates) if (!staffs.some((m) => Math.abs(m - c.mid) < 4.5 * c.mean)) staffs.push(c.mid);
+    staffs.sort((a, b) => a - b);
+    found.push({ x: (x0 + x1) / 2, staffs });
+  }
+  // Follow each staff outwards from the strip that shows the most of them.
+  const middle = (strips - 1) / 2;
+  const startAt = found.reduce((best, f, k) => (f.staffs.length > found[best].staffs.length || (f.staffs.length === found[best].staffs.length && Math.abs(k - middle) < Math.abs(best - middle)) ? k : best), 0);
+  if (found[startAt].staffs.length === 0) return null;
+  const chains = found[startAt].staffs.map((y) => [{ x: found[startAt].x, y }]);
+  for (const direction of [1, -1]) {
+    const last = chains.map((c) => (direction > 0 ? c[c.length - 1] : c[0]));
+    for (let k = startAt + direction; k >= 0 && k < strips; k += direction) {
+      const taken = new Set();
+      chains.forEach((chain, i) => {
+        let best = -1;
+        // A staff drifts gradually: the further from the last strip it was
+        // seen in, the more it may have moved.
+        const reach = 0.5 * period + 0.04 * Math.abs(found[k].x - last[i].x);
+        found[k].staffs.forEach((y, j) => { if (!taken.has(j) && Math.abs(y - last[i].y) < reach && (best < 0 || Math.abs(y - last[i].y) < Math.abs(found[k].staffs[best] - last[i].y))) best = j; });
+        if (best < 0) return;
+        taken.add(best);
+        const point = { x: found[k].x, y: found[k].staffs[best] };
+        if (direction > 0) chain.push(point); else chain.unshift(point);
+        last[i] = point;
+      });
+    }
+  }
+  // A bend changes smoothly; a point far from its neighbours is a staff
+  // picked from the wrong five lines (a ledger line, a beam) and is dropped.
+  for (const chain of chains) {
+    for (let round = 0; round < 2; round++) {
+      const keep = chain.filter((p, i) => {
+        const near = chain.slice(Math.max(0, i - 2), i).concat(chain.slice(i + 1, i + 3)).map((q) => q.y).sort((a, b) => a - b);
+        return near.length < 2 || Math.abs(p.y - near[near.length >> 1]) <= 0.35 * period;
+      });
+      chain.splice(0, chain.length, ...keep);
+    }
+  }
+  const usable = chains.filter((c) => c.length >= 2);
+  if (!usable.length) return null;
+  // Where each staff is at column x (carrying on at the same slope beyond
+  // its ends, where crowded clefs or the last notes hid it), and its height
+  // once straightened (its middle).
+  const along = (a, b, x) => a.y + ((x - a.x) / (b.x - a.x)) * (b.y - a.y);
+  const at = (chain, x) => {
+    const n = chain.length;
+    if (x <= chain[0].x) return along(chain[0], chain[1], x);
+    for (let i = 1; i < n; i++) if (x <= chain[i].x) return along(chain[i - 1], chain[i], x);
+    return along(chain[n - 2], chain[n - 1], x);
+  };
+  const refs = usable.map((c) => at(c, W / 2));
+  let most = 0;
+  const shifts = new Float32Array(usable.length * W);
+  usable.forEach((c, i) => { for (let x = 0; x < W; x++) { const d = at(c, x) - refs[i]; shifts[i * W + x] = d; most = Math.max(most, Math.abs(d)); } });
+  // A pixel or two is measuring noise, not a bend worth straightening.
+  if (most < Math.max(2, 0.15 * period)) return null;
+  const n = usable.length;
+  // Shift of the point at height y (straightened) in column x.
+  const shift = (x, y) => {
+    if (y <= refs[0]) return shifts[x];
+    if (y >= refs[n - 1]) return shifts[(n - 1) * W + x];
+    let i = 0;
+    while (y > refs[i + 1]) i++;
+    const t = (y - refs[i]) / (refs[i + 1] - refs[i]);
+    return shifts[i * W + x] * (1 - t) + shifts[(i + 1) * W + x] * t;
+  };
+  return { shift };
+}
+
+function unbent(ink, W, H, bend) {
+  const out = new Uint8Array(W * H);
+  for (let x = 0; x < W; x++) {
+    for (let y = 0; y < H; y++) {
+      const sy = Math.round(y + bend.shift(x, y));
       if (sy >= 0 && sy < H && ink[sy * W + x]) out[y * W + x] = 1;
     }
   }
@@ -258,14 +432,66 @@ function integral(img, W, H) {
  */
 export function readMusic(img, { debug = false } = {}) {
   const { width: W, height: H } = img;
-  const raw = inkOf(img);
+  const grey = greyOf(img);
+  let raw = inkOf(grey);
+  // A page that is not evenly lit (a photo, a shadow) is read against its
+  // local paper level instead, with a reach that suits the size of the print.
+  const first = lineMetrics(raw, W, H);
+  const reach = Math.round(first.period >= 8 && first.period <= 80 ? 0.75 * first.period + 2 : W / 200);
+  const paper = paperOf(grey, W, H, reach);
+  let uneven = 0, counted = 0;
+  for (let i = 0; i < paper.length; i += 97) { counted++; if (paper[i] < 200) uneven++; }
+  if (uneven > 0.03 * counted) raw = inkAgainst(grey, paper);
   const slope = estimateSlope(raw, W, H);
-  const ink = straightened(raw, W, H, slope);
+  let ink = straightened(raw, W, H, slope);
+  // Twice: the second pass straightens what the first left a little bent.
+  const bends = [];
+  for (let pass = 0; pass < 2; pass++) {
+    const bend = bendOf(ink, W, H, lineMetrics(ink, W, H).period);
+    if (!bend) break;
+    ink = unbent(ink, W, H, bend);
+    bends.push(bend);
+  }
+  // Back from the straightened picture to the page.
+  const toPage = (x, y) => {
+    const column = Math.max(0, Math.min(W - 1, Math.round(x)));
+    for (let i = bends.length - 1; i >= 0; i--) y += bends[i].shift(column, y);
+    return y + x * slope;
+  };
   const { thickness, period } = lineMetrics(ink, W, H);
   const staffs = groupStaffs(findLines(ink, W, H, Math.max(8, period)), period);
-  if (!staffs.length) return { staffs: [], systems: [], notes: [], slope };
+  if (!staffs.length) return { staffs: [], systems: [], notes: [], slope, ...(debug ? { debug: { sym: ink, ink, width: W, height: H } } : null) };
+  // A staff's ends are crowded (clef, key, the last notes), so follow its
+  // lines outwards from the open middle for as long as most of them go on.
+  for (const st of staffs) {
+    const onLines = (x) => st.lines.filter((y) => {
+      for (let d = -thickness; d <= thickness; d++) { const yy = Math.round(y) + d; if (yy >= 0 && yy < H && ink[yy * W + x]) return true; }
+      return false;
+    }).length;
+    const allowed = Math.max(3, Math.round(0.3 * st.space));
+    for (const dir of [-1, 1]) {
+      let x = dir < 0 ? st.x0 : st.x1, last = x, missed = 0;
+      while (x + dir >= 0 && x + dir < W && missed <= allowed) {
+        x += dir;
+        if (onLines(x) >= 4) { last = x; missed = 0; } else missed++;
+      }
+      if (dir < 0) st.x0 = last; else st.x1 = last;
+    }
+  }
 
   const sym = removeLines(ink, W, H, staffs, thickness);
+  // Lines joining staffs into a system (and brackets) are longer than any
+  // stem; a clef printed against one would otherwise become part of it.
+  const median = staffs.map((st) => st.space).sort((a, b) => a - b)[staffs.length >> 1];
+  for (let x = 0; x < W; x++) {
+    for (let y = 0; y < H;) {
+      if (!sym[y * W + x]) { y++; continue; }
+      let end = y;
+      while (end < H && sym[end * W + x]) end++;
+      if (end - y > 6.5 * median) for (let k = y; k < end; k++) sym[k * W + x] = 0;
+      y = end;
+    }
+  }
   const labels = new Int32Array(W * H);
   const comps = [];
   labelComponents(sym, W, H, labels, comps);
@@ -402,7 +628,7 @@ export function readMusic(img, { debug = false } = {}) {
     const holeLabels = new Int32Array(W * H);
     const first = holes.length;
     labelComponents(paper, W, H, holeLabels, holes);
-    for (let i = first; i < holes.length; i++) { holes[i].labels = holeLabels; holes[i].id = i + 1; }
+    for (let i = first; i < holes.length; i++) { holes[i].labels = holeLabels; holes[i].id = i + 1; holes[i].lined = source === ink; }
   }
   const holeLabelsOf = (hole) => hole.labels;
   // Narrower near its top and bottom than across the middle, as an oval is.
@@ -461,7 +687,127 @@ export function readMusic(img, { debug = false } = {}) {
       .filter((r) => r && r[1] - r[0] + 1 <= 1.3 * sp && r[1] - r[0] + 1 >= 0.5 * sp)
       .sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]));
     if (sides.length && Math.abs((sides[0][0] + sides[0][1]) / 2 - cy) < 0.35 * sp) middle = (sides[0][0] + sides[0][1]) / 2;
-    heads.push({ staff: s, cx, cy: middle, x0: left, x1: right, hollow: true, stem, label, other });
+    heads.push({ staff: s, cx, cy: middle, x0: left, x1: right, hollow: true, stem, label, other, lined: hole.lined });
+  }
+
+  // --- Heads of any shape ------------------------------------------------------
+  // Shape-note books print heads as triangles, squares, diamonds and half
+  // moons; the shape tells the singer the step of the scale, while the pitch
+  // still comes from where the head sits. With the stems taken away every
+  // head is a blob of its own: one of head size, against a stem (or a ring,
+  // as a whole note is), is a head, whatever its shape. Its middle gives the
+  // pitch, which also corrects heads found above whose ink is lopsided.
+  const stems = [];
+  for (const s of staffs) {
+    const sp = s.space;
+    const runs = [];
+    for (let x = Math.max(0, s.x0); x <= Math.min(W - 1, s.x1); x++) {
+      for (let y = s.top; y <= s.bottom;) {
+        if (!sym[y * W + x]) { y++; continue; }
+        let end = y;
+        while (end <= s.bottom && sym[end * W + x]) end++;
+        if (end - y >= 2.4 * sp) runs.push({ x, top: y, bottom: end - 1 });
+        y = end;
+      }
+    }
+    const mine = [];
+    for (const r of runs) {
+      const near = mine.find((st) => r.x - st.x1 <= 1 && r.top <= st.bottom && r.bottom >= st.top);
+      if (near) { near.x1 = r.x; near.top = Math.min(near.top, r.top); near.bottom = Math.max(near.bottom, r.bottom); }
+      else mine.push({ staff: s, x0: r.x, x1: r.x, top: r.top, bottom: r.bottom });
+    }
+    for (const st of mine) {
+      if (st.x1 - st.x0 + 1 > 0.35 * sp) continue;
+      st.x = Math.round((st.x0 + st.x1) / 2);
+      // A bar line runs the height of the staff (or further); no head hangs on it.
+      st.bar = st.top <= s.lines[0] + 0.25 * sp && st.bottom >= s.lines[4] - 0.25 * sp;
+      stems.push(st);
+    }
+  }
+  const bare = sym.slice();
+  for (const st of stems) for (let x = st.x0; x <= st.x1; x++) for (let y = st.top; y <= st.bottom; y++) bare[y * W + x] = 0;
+  const blobLabels = new Int32Array(W * H);
+  const blobs = [];
+  labelComponents(bare, W, H, blobLabels, blobs);
+  blobs.forEach((b, i) => { b.id = i + 1; });
+  for (const b of blobs) {
+    const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+    const s = staffs.find((t) => cy >= t.top && cy <= t.bottom && cx >= t.x0 && cx <= t.x1);
+    if (!s) continue;
+    const sp = s.space;
+    const w = b.x1 - b.x0 + 1, h = b.y1 - b.y0 + 1;
+    if (w < 0.75 * sp || w > 1.9 * sp || h < 0.55 * sp || h > 1.35 * sp || b.area < 0.25 * w * h) continue;
+    // Against a stem: on its left (stem up) or its right (stem down), at the
+    // height the stem reaches.
+    // The head and its stem are one piece of ink; a bar line beside a head is not.
+    const joined = (st) => {
+      const own = new Set();
+      for (let y = b.y0; y <= b.y1; y++) for (let x = b.x0; x <= b.x1; x++) if (blobLabels[y * W + x] === b.id) own.add(labels[y * W + x]);
+      for (let y = Math.max(st.top, b.y0 - 2); y <= Math.min(st.bottom, b.y1 + 2); y++) if (own.has(labels[y * W + st.x])) return true;
+      return false;
+    };
+    let stem = null;
+    for (const st of stems) {
+      if (st.staff !== s || cy < st.top - 0.8 * sp || cy > st.bottom + 0.8 * sp) continue;
+      let dir = null;
+      if (Math.abs(st.x0 - b.x1) <= 0.35 * sp) dir = 'up';
+      else if (Math.abs(b.x0 - st.x1) <= 0.35 * sp) dir = 'down';
+      if (!dir || !joined(st)) continue;
+      stem = { x: st.x, top: st.top, bottom: st.bottom, len: st.bottom - st.top + 1, dir };
+      break;
+    }
+    if (stem) {
+      const matched = stems.find((st) => st.staff === s && st.x === stem.x);
+      if (matched) matched.used = true;
+    }
+    // Outlined or filled: is the blob's middle (its centre of ink) paper?
+    let sx = 0, sy = 0, n = 0;
+    for (let y = b.y0; y <= b.y1; y++) for (let x = b.x0; x <= b.x1; x++) if (blobLabels[y * W + x] === b.id) { sx += x; sy += y; n++; }
+    const r = Math.max(1, Math.round(0.12 * sp)), mx = Math.round(sx / n), my = Math.round(sy / n);
+    let inside = 0;
+    for (let y = my - r; y <= my + r; y++) for (let x = mx - r; x <= mx + r; x++) if (blobLabels[y * W + x] === b.id) inside++;
+    const hollow = inside / ((2 * r + 1) * (2 * r + 1)) < 0.35;
+    // A whole note has no stem: it must be an outline, and wide.
+    if (!stem && !(hollow && w >= 1.25 * sp)) continue;
+    // Letters of the words touch their neighbours; a head has paper beside it
+    // (on the side away from its stem).
+    // (Specks along a shadow's edge do not count: a letter fills a good part
+    // of the height beside it.)
+    const clearOf = (from, to) => {
+      let rows = 0, filled = 0;
+      for (let y = b.y0 + Math.round(0.2 * h); y <= b.y1 - Math.round(0.2 * h); y++) {
+        rows++;
+        for (let x = Math.max(0, from); x <= Math.min(W - 1, to); x++) if (bare[y * W + x]) { filled++; break; }
+      }
+      return filled < 0.35 * rows;
+    };
+    const gap = Math.round(0.3 * sp);
+    if (stem?.dir !== 'up' && !clearOf(b.x1 + 2, b.x1 + gap)) continue;
+    if (stem?.dir !== 'down' && !clearOf(b.x0 - gap, b.x0 - 2)) continue;
+    const known = heads.filter((hd) => hd.staff === s && Math.abs(hd.cx - cx) < 0.6 * sp && Math.abs(hd.cy - cy) < 0.6 * sp);
+    if (known.length) { for (const hd of known) hd.cy = cy; continue; }
+    heads.push({ staff: s, cx, cy, x0: b.x0, x1: b.x1, hollow, stem, label: labelAt(stem ? stem.x : Math.round(cx), Math.round(cy)), shaped: true });
+  }
+
+  // Every head is measured by its own outline (stem taken away): a hole or a
+  // filled core can sit off the middle of a head that is not an oval, or
+  // whose inside is split by its stem.
+  for (const hd of heads) {
+    const sp = hd.staff.space;
+    const count = new Map();
+    for (let y = Math.round(hd.cy - 0.5 * sp); y <= hd.cy + 0.5 * sp; y++) {
+      for (let x = Math.round(hd.cx - 0.6 * sp); x <= hd.cx + 0.6 * sp; x++) {
+        if (x < 0 || y < 0 || x >= W || y >= H) continue;
+        const l = blobLabels[y * W + x];
+        if (l) count.set(l, (count.get(l) || 0) + 1);
+      }
+    }
+    let best = 0, most = 0;
+    for (const [l, n] of count) if (n > most) { most = n; best = l; }
+    if (!best) continue;
+    const b = blobs[best - 1];
+    const w = b.x1 - b.x0 + 1, h = b.y1 - b.y0 + 1;
+    if (w >= 0.6 * sp && w <= 1.9 * sp && h >= 0.5 * sp && h <= 1.35 * sp && Math.abs((b.y0 + b.y1) / 2 - hd.cy) < 0.45 * sp) hd.cy = (b.y0 + b.y1) / 2;
   }
 
   // --- Bar lines -------------------------------------------------------------
@@ -469,7 +815,9 @@ export function readMusic(img, { debug = false } = {}) {
   for (const s of staffs) {
     const top = Math.round(s.lines[0]), bottom = Math.round(s.lines[4]);
     const span = bottom - top + 1;
+    // Stems of found notes (their full width), and any stem a head-sized blob hangs on.
     const stemXs = heads.filter((h) => h.stem && h.staff === s).map((h) => h.stem.x);
+    for (const st of stems) if (st.staff === s && (st.used || !st.bar)) for (let x = st.x0 - 1; x <= st.x1 + 1; x++) stemXs.push(x);
     const xs = [];
     for (let x = s.x0 - 3; x <= s.x1 + 3; x++) {
       if (x < 0 || x >= W) continue;
@@ -482,7 +830,12 @@ export function readMusic(img, { debug = false } = {}) {
       const last = bars[bars.length - 1];
       if (last && x - last.x1 <= 1) last.x1 = x; else bars.push({ x0: x, x1: x });
     }
-    s.bars = bars.filter((b) => b.x1 - b.x0 + 1 <= 0.8 * s.space).map((b) => (b.x0 + b.x1) / 2);
+    // A bar line stands alone; a stem whose head was missed is joined to it.
+    const alone = (b) => {
+      const l = labelAt(Math.round((b.x0 + b.x1) / 2), Math.round((top + bottom) / 2));
+      return !l || comps[l - 1].w <= b.x1 - b.x0 + 1 + 0.5 * s.space;
+    };
+    s.bars = bars.filter((b) => b.x1 - b.x0 + 1 <= 0.8 * s.space && alone(b)).map((b) => (b.x0 + b.x1) / 2);
   }
 
   // --- Clefs, key signatures --------------------------------------------------
@@ -540,7 +893,9 @@ export function readMusic(img, { debug = false } = {}) {
   for (const s of staffs) {
     const sp = s.space;
     const start = s.bars.length && s.bars[0] - s.x0 < 1.5 * sp ? s.bars[0] + 2 : s.x0;
-    const candidates = compsIn(s, start, start + 4.5 * sp).filter((c) => c.w >= 0.6 * sp && c.x0 >= start - sp);
+    const candidates = compsIn(s, start, start + 4.5 * sp).filter((c) => c.w >= 0.6 * sp && c.x0 >= start - sp && c.h < 9 * sp
+      // Mostly on this staff, not the clef of the staff above or below.
+      && Math.min(c.y1, s.lines[4] + 0.5 * sp) - Math.max(c.y0, s.lines[0] - 0.5 * sp) >= 0.4 * c.h);
     let tallest = null;
     for (const c of candidates) if (!tallest || c.h > tallest.h) tallest = c;
     // Faint or thin parts of a clef can be lost with the staff lines, leaving
@@ -563,7 +918,7 @@ export function readMusic(img, { debug = false } = {}) {
         const below = clef.eight || compsIn(s, clef.x0, clef.x1, 4.5).find((c) => !clef.parts.includes(c) && c.y0 > clef.y1 - 0.4 * sp && c.y0 < clef.y1 + 1.2 * sp && c.h < 1.4 * sp && c.h > 0.5 * sp);
         if (below) { s.clef = 'treble8'; used.add(below.index); }
         // ...or joined on to the clef's tail, making it reach further down.
-        else if (clef.y1 > s.lines[4] + 2.1 * sp) s.clef = 'treble8';
+        else if (clef.y1 > s.lines[4] + 2.45 * sp) s.clef = 'treble8';
       } else if (clef.h >= 2.4 * sp && clef.h <= 4.6 * sp && Math.abs(clef.y0 - s.lines[0]) < 0.8 * sp && clef.y1 < s.lines[4] + 0.6 * sp) {
         s.clef = 'bass';
       }
@@ -579,6 +934,9 @@ export function readMusic(img, { debug = false } = {}) {
     const after = compsIn(s, s.headerEnd + 1, s.headerEnd + 9 * sp).filter((c) => c.x0 > s.headerEnd && !used.has(c.index) && c.area >= 0.1 * sp * sp).sort((a, b) => a.x0 - b.x0);
     for (const c of after) {
       if (c.x0 - x > 1.6 * sp) break;
+      // Bits of the clef's flourish, and words above or below the staff, are passed over.
+      if (c.h < 1.2 * sp && (c.y1 < s.lines[0] + 0.5 * sp || c.y0 > s.lines[4] - 0.5 * sp)) continue;
+      if ((c.y0 + c.y1) / 2 < s.lines[0] - 1.5 * sp || (c.y0 + c.y1) / 2 > s.lines[4] + 1 * sp) continue;
       const k = accidentalKind(c, sp);
       if (!k || k === 'natural' || (kind && k !== kind) || isStemLabel.has(c.index)) break;
       kind = k; count++; x = c.x1; used.add(c.index);
@@ -607,13 +965,22 @@ export function readMusic(img, { debug = false } = {}) {
     const above = prev && prev.staffs[prev.staffs.length - 1];
     let joined = false;
     if (above && Math.abs(above.x0 - s.x0) < 2 * s.space) {
-      const xs = [above.x0, s.x0, ...above.bars.filter((b) => s.bars.some((c) => Math.abs(c - b) < 3))];
-      for (const bx of xs) {
-        for (let x = Math.round(bx) - 3; x <= bx + 3 && !joined; x++) {
+      // Around the staffs' left ends (the joining line can sit just before
+      // them), and at bar lines the two staffs share.
+      const left = Math.min(above.x0, s.x0);
+      const spans = [[left - s.space, Math.max(above.x0, s.x0) + 0.5 * s.space], ...above.bars.filter((b) => s.bars.some((c) => Math.abs(c - b) < 3)).map((b) => [b - 3, b + 3])];
+      for (const [from, to] of spans) {
+        for (let x = Math.max(0, Math.round(from)); x <= Math.min(W - 1, to) && !joined; x++) {
           let n = 0;
           const y0 = Math.round(above.lines[4]), y1 = Math.round(s.lines[0]);
-          for (let y = y0; y <= y1; y++) n += ink[y * W + x];
-          if (n >= 0.95 * (y1 - y0 + 1)) joined = true;
+          // On a turned page, upright lines lean once the staffs are levelled.
+          for (let y = y0; y <= y1; y++) {
+            const at = Math.round(x - (y - y0) * slope);
+            let hit = 0;
+            for (let d = -2; d <= 2 && !hit; d++) if (at + d >= 0 && at + d < W) hit = ink[y * W + at + d];
+            n += hit;
+          }
+          if (n >= 0.85 * (y1 - y0 + 1)) joined = true;
         }
         if (joined) break;
       }
@@ -635,18 +1002,44 @@ export function readMusic(img, { debug = false } = {}) {
     // Bar lines: any found on one staff of the system count for all of them.
     const all = [];
     for (const s of sys.staffs) for (const b of s.bars) if (!all.some((a) => Math.abs(a - b) < s.space)) all.push(b);
-    sys.bars = all.sort((a, b) => a - b);
+    const seenOn = (b) => sys.staffs.filter((s) => s.bars.some((c) => Math.abs(c - b) < s.space)).length;
+    sys.bars = all.filter((b) => seenOn(b) >= 1).sort((a, b) => a - b);
     sys.x0 = Math.min(...sys.staffs.map((s) => s.x0));
     sys.x1 = Math.max(...sys.staffs.map((s) => s.x1));
   }
 
   // --- Pitches, accidentals, durations ---------------------------------------
+  // Where the five lines really are beside x: on a photographed page they
+  // can be a little off the staff's straightened average.
+  const linesNear = (s, x) => {
+    const sp = s.space, half = Math.round(3 * sp);
+    return s.lines.map((line) => {
+      let best = line, most = -1;
+      for (let y = Math.round(line - 0.35 * sp); y <= line + 0.35 * sp; y++) {
+        if (y < 0 || y >= H) continue;
+        let n = 0;
+        for (let xx = Math.max(0, Math.round(x - half)); xx <= Math.min(W - 1, x + half); xx++) n += ink[y * W + xx];
+        if (n > most) { most = n; best = y; }
+      }
+      return best;
+    });
+  };
+  // Steps above the bottom line (2 to a space), from the nearby lines.
+  const stepAt = (s, x, y) => {
+    const L = linesNear(s, x);
+    const gap = (L[4] - L[0]) / 4 || s.space;
+    if (y >= L[4]) return (2 * (L[4] - y)) / gap;
+    if (y <= L[0]) return 8 + (2 * (L[0] - y)) / gap;
+    let j = 0;
+    while (j < 3 && y > L[j + 1]) j++;
+    return 2 * (3 - j) + (2 * (L[j + 1] - y)) / (L[j + 1] - L[j]);
+  };
   const notes = [];
   for (const head of heads) {
     const s = head.staff;
     if (head.cx <= s.headerEnd) continue;
     const sp = s.space;
-    const step = Math.round((s.lines[4] - head.cy) / (sp / 2));
+    const step = Math.round(stepAt(s, head.cx, head.cy));
     const number = BOTTOM_LINE[s.clef] + step;
     const letter = ((number % 7) + 7) % 7;
     const octave = Math.floor(number / 7);
@@ -665,16 +1058,19 @@ export function readMusic(img, { debug = false } = {}) {
     if (dotted(s, head)) duration *= 1.5;
     notes.push({
       x: head.cx, y: head.cy, x0: head.x0, x1: head.x1, staff: s.index, clef: s.clef, step: number, letter, octave, accidental,
-      duration, hollow: head.hollow, stem: head.stem ? head.stem.dir : null,
+      duration, hollow: head.hollow, stem: head.stem ? head.stem.dir : null, stemX: head.stem ? head.stem.x : null, rank: head.shaped ? 0 : !head.hollow || head.lined ? 1 : 2,
     });
   }
   // Two heads found for the same place (a filled core inside a hollow ring) count once.
-  notes.sort((a, b) => a.x - b.x || a.y - b.y);
+  // When two finds overlap, the more trustworthy one is kept: a whole blob,
+  // then a ring closed by its staff line, then the rest.
+  notes.sort((a, b) => a.rank - b.rank || a.x - b.x || a.y - b.y);
   const unique = [];
   for (const n of notes) {
     const sp = staffs[n.staff].space;
     if (!unique.some((m) => m.staff === n.staff && Math.abs(m.x - n.x) < 0.5 * sp && Math.abs(m.y - n.y) < 0.6 * sp)) unique.push(n);
   }
+  unique.sort((a, b) => a.x - b.x || a.y - b.y);
 
   // Sharps and flats: key signature, then accidentals that last to the bar line.
   for (const sys of systems) {
@@ -695,14 +1091,14 @@ export function readMusic(img, { debug = false } = {}) {
     }
   }
 
-  // Back to the page's own (tilted) coordinates.
-  for (const n of unique) n.y += n.x * slope;
+  // Back to the page's own (tilted, bent) coordinates.
+  for (const n of unique) n.y = toPage(n.x, n.y);
   const out = staffs.map((s) => ({
-    index: s.index, lines: s.lines.map((y) => y + ((s.x0 + s.x1) / 2) * slope), space: s.space, x0: s.x0, x1: s.x1,
+    index: s.index, lines: s.lines.map((y) => toPage((s.x0 + s.x1) / 2, y)), space: s.space, x0: s.x0, x1: s.x1,
     clef: s.clef, fifths: s.fifths, bars: s.bars, headerEnd: s.headerEnd,
   }));
   return {
-    ...(debug ? { debug: { sym, width: W, height: H } } : null),
+    ...(debug ? { debug: { sym, ink, width: W, height: H } } : null),
     staffs: out,
     systems: systems.map((sys) => ({ staffs: sys.staffs.map((s) => s.index), bars: sys.bars, x0: sys.x0, x1: sys.x1 })),
     notes: unique.filter((n) => n.midi != null),

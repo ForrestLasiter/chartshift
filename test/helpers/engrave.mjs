@@ -39,17 +39,77 @@ function notesOf(mei) {
  * @param {{ from?: 'abc'|'mei', width?: number, scale?: number, rotate?: number, noise?: number }} options
  * @returns {Promise<{ img: {data, width, height}, notes: object[], svg: string }>}
  */
-export async function engrave(data, { from = data.trimStart().startsWith('<') ? 'mei' : 'abc', width = 2550, scale = 40, rotate = 0, noise = 0, blur = 0 } = {}) {
+export async function engrave(data, { from = data.trimStart().startsWith('<') ? 'mei' : 'abc', width = 2550, scale = 40, rotate = 0, noise = 0, blur = 0, shapes = null, photo = false } = {}) {
   const tk = await verovio();
   tk.setOptions({ inputFrom: from, pageWidth: Math.round((2100 * 40) / scale), pageHeight: Math.round((2970 * 40) / scale), scale: 40, adjustPageHeight: true, header: 'none', footer: 'none', breaks: 'auto' });
   if (!tk.loadData(data)) throw new Error('Verovio could not read the test tune');
   let svg = tk.renderToSVG(1);
+  const notes = notesOf(tk.getMEI());
+  if (shapes != null) svg = shapeNotes(svg, notes, shapes);
   if (rotate) svg = svg.replace(/(<svg[^>]*>)/, `$1<g transform="rotate(${rotate} 1000 500)">`).replace(/<\/svg>\s*$/, '</g></svg>');
   const rendered = new Resvg(svg, { fitTo: { mode: 'width', value: width }, background: 'white', font: { loadSystemFonts: true } }).render();
-  const img = { data: new Uint8ClampedArray(rendered.pixels), width: rendered.width, height: rendered.height };
+  let img = { data: new Uint8ClampedArray(rendered.pixels), width: rendered.width, height: rendered.height };
+  if (photo) img = photographed(img);
   if (blur) softened(img);
   if (noise) speckled(img, noise);
-  return { img, notes: notesOf(tk.getMEI()), svg };
+  return { img, notes, svg };
+}
+
+// Seven-shape heads (do re mi fa sol la ti, as in Walker's Christian Harmony
+// and other shape-note books), chosen by each note's step in the key whose
+// key note is `tonic` (0 = C). Stems are run on to the shape's corner, as
+// those books print them.
+const SHAPE_OF_STEP = { 0: 'do', 2: 're', 4: 'mi', 5: 'fa', 7: 'sol', 9: 'la', 11: 'ti' };
+function shapeNotes(svg, notes, tonic) {
+  let n = 0;
+  return svg.replace(/(<g class="notehead">\s*)<use xlink:href="#(E0A[234])[^"]*" transform="translate\((-?\d+), (-?\d+)\)[^"]*" \/>(\s*<\/g>\s*(?:<g[^>]*class="stem">\s*<path d="M(-?\d+) (-?\d+) L(-?\d+) (-?\d+)"[^/]*\/>)?)/g,
+    (whole, open, glyph, xs, ys, rest, sx, sy1, sx2, sy2) => {
+      const note = notes[n++];
+      const shape = note ? SHAPE_OF_STEP[(((note.midi - tonic) % 12) + 12) % 12] : null;
+      if (!shape || shape === 'sol' || glyph === 'E0A2') return whole;
+      const x = Number(xs), y = Number(ys), w = shape === 'mi' ? 270 : shape === 'la' ? 250 : 212, h = 90;
+      const path = {
+        do: `M${x} ${y + h}L${x + w} ${y + h}L${x + w / 2} ${y - h}Z`,
+        re: `M${x} ${y - h}L${x + w} ${y - h}A${w / 2} ${2 * h} 0 0 1 ${x} ${y - h}Z`,
+        mi: `M${x + w / 2} ${y - h}L${x + w} ${y}L${x + w / 2} ${y + h}L${x} ${y}Z`,
+        fa: `M${x + w} ${y - h}L${x + w} ${y + h}L${x} ${y + h}Z`,
+        la: `M${x + 15} ${y - h + 10}H${x + w - 15}V${y + h - 10}H${x + 15}Z`,
+        ti: `M${x} ${y - h / 2}Q${x + w / 2} ${y - 1.4 * h} ${x + w} ${y - h / 2}L${x + w / 2} ${y + h}Z`,
+      }[shape];
+      const filled = glyph === 'E0A4';
+      const head = `<path d="${path}" ${filled ? 'fill="currentColor"' : 'fill="none" stroke="currentColor" stroke-width="26" stroke-linejoin="round"'} />`;
+      let tail = rest;
+      if (sx != null) {
+        // Run the stem on to the top or bottom of the shape.
+        const top = Math.min(Number(sy1), Number(sy2)), bottom = Math.max(Number(sy1), Number(sy2));
+        const up = Number(sx) > x + w / 2;
+        const from = up ? Math.max(bottom, y + h) : Math.min(top, y - h);
+        const to = up ? top : bottom;
+        tail = rest.replace(/<path d="M-?\d+ -?\d+ L-?\d+ -?\d+"/, `<path d="M${sx} ${from} L${sx2} ${to}"`);
+      }
+      return open + head + tail;
+    });
+}
+
+// A photographed book page: the paper bows a little (lines curve), and a
+// hand's shadow falls across part of it.
+function photographed({ data, width: W, height: H }) {
+  const out = new Uint8ClampedArray(data.length).fill(255);
+  const bow = 0.012 * W;
+  for (let x = 0; x < W; x++) {
+    const dy = bow * Math.sin((Math.PI * x) / W) + 0.006 * (x - W / 2);
+    // Shadow: darker in a band about a third of the way across, soft at its edges.
+    const t = (x - 0.38 * W) / (0.12 * W);
+    const shade = 1 - 0.5 * Math.exp(-(t ** 4));
+    for (let y = 0; y < H; y++) {
+      const sy = Math.round(y - dy);
+      const v = sy >= 0 && sy < H ? data[(sy * W + x) * 4] : 255;
+      const p = (y * W + x) * 4;
+      out[p] = out[p + 1] = out[p + 2] = v * shade;
+      out[p + 3] = 255;
+    }
+  }
+  return { data: out, width: W, height: H };
 }
 
 // Scanner-like softening: a small box blur.
