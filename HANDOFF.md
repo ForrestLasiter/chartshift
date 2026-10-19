@@ -32,10 +32,20 @@ All in `src/lib/omr.js` unless noted:
 | piece | clean | scan | photo | shapes | shapes+photo |
 |---|---|---|---|---|---|
 | waltz (18) | 18 | 18 | 18 | **18** | 18 |
-| hymn (76) | 76 | 76 | 75 | **72** (2 extra) | **69** (6 extra) |
+| hymn (76) | 76 | 76 | 75 | **72** (2 extra) | **70** (5 extra) |
 | melody (46) | 46 | 46 | 46 (2 extra) | 45 (2 extra) | 44 (3 extra) |
 
 An owner-provided page photo was inspected locally with `scripts/render-song.mjs`, `scripts/omr-bars.mjs` and `scripts/omr-debug.mjs`. Both systems were found, with treble/bass clefs, A-flat (four flats) and 3/4. The first line's melody reads correctly (Eb F | Ab C Ab | C Bb | Ab F | Eb … | Ab C Ab | C Bb | Eb). The bass staff and the second system remain rougher and need a verified transcription before pitch tuning. Do not commit the photo or any render derived from it.
+
+### Fixed after 0.8.0 (2026-10-19, uncommitted)
+
+On the real photo, checked bar by bar against the page:
+- An outlined head on a line (a diamond on a ledger line) was split by the line into two holes, and the upper one read a step high (phantom D-flat). Two holes one above the other, separated only by the line's own thickness and with a line between them, are now one head.
+- Pieces of a head cut apart where a line was erased are joined back together (only pieces under 0.6 space tall, so two notes a third apart stay separate).
+- The blend along a hand shadow's hard edge was read as ink, gluing heads to a dotted streak. Where the paper level jumps by more than 30 within two pixels, ink is now judged against the darker side.
+- On photos only, a blob too big for a head has thin tails trimmed before it is judged.
+
+First line of the photo, treble: every bar right except bar 5's hollow triangle (A-flat, touching the shadow's edge) and the alto half note in bar 6. Bass: improved but not yet checked against a full transcription.
 
 ## Next steps
 

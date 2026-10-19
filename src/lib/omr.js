@@ -441,7 +441,15 @@ export function readMusic(img, { debug = false } = {}) {
   const paper = paperOf(grey, W, H, reach);
   let uneven = 0, counted = 0;
   for (let i = 0; i < paper.length; i += 97) { counted++; if (paper[i] < 200) uneven++; }
-  if (uneven > 0.03 * counted) raw = inkAgainst(grey, paper);
+  // Along a shadow's hard edge the light-to-dark blend is darker than the
+  // white beside it, but not ink: there, ink is judged against the darker
+  // side (the darkest paper within a couple of pixels).
+  const photo = uneven > 0.03 * counted;
+  if (photo) {
+    const darkest = sweep(sweep(paper, W, H, 2, true, false), W, H, 2, false, false);
+    for (let i = 0; i < paper.length; i++) if (paper[i] - darkest[i] > 30) paper[i] = darkest[i];
+    raw = inkAgainst(grey, paper);
+  }
   const slope = estimateSlope(raw, W, H);
   let ink = straightened(raw, W, H, slope);
   // Twice: the second pass straightens what the first left a little bent.
@@ -687,8 +695,29 @@ export function readMusic(img, { debug = false } = {}) {
       .filter((r) => r && r[1] - r[0] + 1 <= 1.3 * sp && r[1] - r[0] + 1 >= 0.5 * sp)
       .sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]));
     if (sides.length && Math.abs((sides[0][0] + sides[0][1]) / 2 - cy) < 0.35 * sp) middle = (sides[0][0] + sides[0][1]) / 2;
-    heads.push({ staff: s, cx, cy: middle, x0: left, x1: right, hollow: true, stem, label, other, lined: hole.lined });
+    heads.push({ staff: s, cx, cy: middle, x0: left, x1: right, hollow: true, stem, label, other, lined: hole.lined, holeTop: hole.y0, holeBottom: hole.y1 });
   }
+
+  // A line through the middle of an outlined head (a note on a line or a
+  // ledger line) splits its inside into two holes, one above the other:
+  // they are one head, half way between.
+  for (const upper of heads) {
+    if (!upper.hollow || upper.merged) continue;
+    const sp = upper.staff.space;
+    // With a line (a whole number of spaces from the bottom line) between them.
+    const onLine = (y) => { const k = (upper.staff.lines[4] - y) / sp; return Math.abs(k - Math.round(k)) < 0.18; };
+    // Only the line's own thickness lies between the two holes; two notes a
+    // third apart also have their ring edges between them.
+    // (Measured by the holes' edges: the heads' centres may have been adjusted.)
+    if (upper.holeBottom == null) continue;
+    const lower = heads.find((h) => h !== upper && h.hollow && !h.merged && h.staff === upper.staff && h.holeTop != null && h.holeTop > upper.holeBottom
+      && h.holeTop - upper.holeBottom - 1 <= thickness + 2 && Math.abs(h.cx - upper.cx) < 0.35 * sp && onLine((upper.holeBottom + h.holeTop) / 2));
+    if (!lower) continue;
+    upper.cy = (upper.holeTop + lower.holeBottom) / 2;
+    upper.x0 = Math.min(upper.x0, lower.x0); upper.x1 = Math.max(upper.x1, lower.x1);
+    lower.merged = true;
+  }
+  for (let i = heads.length - 1; i >= 0; i--) if (heads[i].merged) heads.splice(i, 1);
 
   // --- Heads of any shape ------------------------------------------------------
   // Shape-note books print heads as triangles, squares, diamonds and half
@@ -730,9 +759,46 @@ export function readMusic(img, { debug = false } = {}) {
   const blobs = [];
   labelComponents(bare, W, H, blobLabels, blobs);
   blobs.forEach((b, i) => { b.id = i + 1; });
+  // A head cut in two where a ledger or staff line through it was taken away
+  // is put back together, so its two halves are not read as two notes.
+  const halves = blobs.filter((b) => b.y1 - b.y0 + 1 <= 0.6 * median && b.x1 - b.x0 + 1 >= 0.3 * median && b.x1 - b.x0 + 1 <= 1.9 * median);
+  halves.sort((a, b) => a.y0 - b.y0);
+  for (const upper of halves) {
+    if (upper.dead) continue;
+    for (const lower of halves) {
+      if (lower === upper || lower.dead || lower.y0 <= upper.y1) continue;
+      const gap = lower.y0 - upper.y1 - 1;
+      if (gap > thickness + 2) continue;
+      const overlap = Math.min(upper.x1, lower.x1) - Math.max(upper.x0, lower.x0) + 1;
+      if (overlap < 0.6 * Math.min(upper.x1 - upper.x0 + 1, lower.x1 - lower.x0 + 1)) continue;
+      if (Math.max(upper.y1, lower.y1) - upper.y0 + 1 > 1.35 * median) continue;
+      for (let y = lower.y0; y <= lower.y1; y++) for (let x = lower.x0; x <= lower.x1; x++) if (blobLabels[y * W + x] === lower.id) blobLabels[y * W + x] = upper.id;
+      upper.x0 = Math.min(upper.x0, lower.x0); upper.x1 = Math.max(upper.x1, lower.x1); upper.y1 = Math.max(upper.y1, lower.y1);
+      upper.area += lower.area;
+      lower.dead = true;
+      break;
+    }
+  }
   for (const b of blobs) {
+    if (b.dead) continue;
+    let s = staffs.find((t) => (b.y0 + b.y1) / 2 >= t.top && (b.y0 + b.y1) / 2 <= t.bottom && (b.x0 + b.x1) / 2 >= t.x0 && (b.x0 + b.x1) / 2 <= t.x1);
+    if (!s) continue;
+    // On a photo, thin tails (a streak along a shadow's edge, the stub of a
+    // line) are trimmed off a blob too big for a head, in case one is inside.
+    const tooBig = b.x1 - b.x0 + 1 > 1.9 * s.space || b.y1 - b.y0 + 1 > 1.35 * s.space;
+    if (photo && tooBig && b.x1 - b.x0 + 1 <= 3 * s.space && b.y1 - b.y0 + 1 <= 3 * s.space) {
+      const thin = Math.max(2, 0.15 * s.space);
+      const rowOf = (y) => { let n = 0; for (let x = b.x0; x <= b.x1; x++) if (blobLabels[y * W + x] === b.id) n++; return n; };
+      const colOf = (x) => { let n = 0; for (let y = b.y0; y <= b.y1; y++) if (blobLabels[y * W + x] === b.id) n++; return n; };
+      while (b.y1 > b.y0 && rowOf(b.y1) <= thin) b.y1--;
+      while (b.y0 < b.y1 && rowOf(b.y0) <= thin) b.y0++;
+      while (b.x1 > b.x0 && colOf(b.x1) <= thin) b.x1--;
+      while (b.x0 < b.x1 && colOf(b.x0) <= thin) b.x0++;
+      b.area = 0;
+      for (let y = b.y0; y <= b.y1; y++) b.area += rowOf(y);
+    }
     const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
-    const s = staffs.find((t) => cy >= t.top && cy <= t.bottom && cx >= t.x0 && cx <= t.x1);
+    s = staffs.find((t) => cy >= t.top && cy <= t.bottom && cx >= t.x0 && cx <= t.x1);
     if (!s) continue;
     const sp = s.space;
     const w = b.x1 - b.x0 + 1, h = b.y1 - b.y0 + 1;
