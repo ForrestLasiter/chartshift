@@ -290,7 +290,7 @@ export function App() {
     setDialog(null);
     run('Reading the words…', async (progress) => {
       const st = editor.getState();
-      const [{ cleanedForReading }, { recognise, readSyllable }, { chordChart, missingSyllables }] = await Promise.all([
+      const [{ cleanedForReading }, { recognise, readSyllable }, { chordChart, lyricBands, missingSyllables }] = await Promise.all([
         import('./lib/omr.js'), import('./lib/ocr.js'), import('./lib/lyrics.js'),
       ]);
       const pages = [];
@@ -298,9 +298,52 @@ export function App() {
         progress(`Reading the words on page ${n + 1} of ${readings.length}… (the first time takes a little longer)`);
         const canvas = renderPageCanvas(st.pages[reading.pageIndex], editor.atlases, SHEET_DPI);
         const ctx = canvas.getContext('2d');
+        const original = document.createElement('canvas');
+        original.width = canvas.width;
+        original.height = canvas.height;
+        original.getContext('2d').drawImage(canvas, 0, 0);
+        const photoPixels = original.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
         const clean = cleanedForReading(ctx.getImageData(0, 0, canvas.width, canvas.height));
         ctx.putImageData(new ImageData(clean.data, clean.width, clean.height), 0, 0);
-        const rows = await recognise(canvas, reading.scale);
+        // Only the bands of words between the staffs are read: notes confuse the OCR.
+        const rows = [];
+        for (const band of lyricBands(reading.music)) {
+          const x = Math.round(band.x0), y = Math.round(band.y0);
+          const w = Math.round(band.x1 - band.x0), h = Math.round(band.y1 - band.y0);
+          const readBand = async (source, enlargement = 1) => {
+            const piece = document.createElement('canvas');
+            piece.width = w * enlargement;
+            piece.height = h * enlargement;
+            piece.getContext('2d').drawImage(source, x, y, w, h, 0, 0, piece.width, piece.height);
+            return recognise(piece, reading.scale * enlargement, { block: true });
+          };
+          // The photo can retain letters softened by cleanup; enlargement helps tiny print.
+          const baseRows = await readBand(canvas);
+          let changed = 0, samples = 0;
+          for (let py = y; py < y + h; py += 4) for (let px = x; px < x + w; px += 4) {
+            const at = (py * canvas.width + px) * 4;
+            if (Math.abs(photoPixels[at] - clean.data[at]) > 35 || Math.abs(photoPixels[at + 1] - clean.data[at + 1]) > 35 || Math.abs(photoPixels[at + 2] - clean.data[at + 2]) > 35) changed++;
+            samples++;
+          }
+          const otherRows = changed / samples > 0.15 ? await readBand(original, 2) : [];
+          const dx = Math.round(band.x0) / reading.scale, dy = Math.round(band.y0) / reading.scale;
+          const chosen = baseRows.flatMap((row) => row.tokens.map((word) => ({ ...word })));
+          const staffSpace = reading.music.staffs[reading.music.systems[band.system].staffs[0]].space / reading.scale;
+          for (const word of otherRows.flatMap((row) => row.tokens)) {
+            const centre = (word.x0 + word.x1) / 2;
+            const match = chosen.find((other) => Math.abs((other.x0 + other.x1) / 2 - centre) < Math.max(0.65 * staffSpace, 0.4 * (other.x1 - other.x0)));
+            if (match) {
+              if ((match.confidence ?? 100) < 45 && (word.confidence ?? 0) >= (match.confidence ?? 0) + 20) Object.assign(match, word);
+            } else if ((word.confidence ?? 0) >= 50 && !chosen.some((other) => Math.abs((other.x0 + other.x1) / 2 - centre) < 1.2 * staffSpace)) {
+              chosen.push({ ...word });
+            }
+          }
+          const merged = await import('./lib/ocr.js').then(({ rowsByBaseline }) => rowsByBaseline(chosen));
+          for (const row of merged) {
+            for (const t of row.tokens) { t.x0 += dx; t.x1 += dx; t.y0 += dy; t.y1 += dy; t.base += dy; t.line += 1000 * (band.system + 1); }
+            rows.push({ ...row, base: row.base + dy });
+          }
+        }
         const page = { ...reading, rows };
         const boxes = missingSyllables(page);
         for (const [k, box] of boxes.entries()) {
@@ -316,8 +359,10 @@ export function App() {
           pctx.drawImage(canvas, sx, sy, w, h, pad, pad, w, h);
           const { text, confidence } = await readSyllable(piece);
           // Only clear readings of a short word: a wrong word is worse than a gap.
-          if (!text || confidence < 70 || !/[A-Za-z]/.test(text) || !/^[A-Za-z'’,.;:!?-]{1,6}$/.test(text)) continue;
+          if (!text || confidence < 70 || !/[A-Za-z]/.test(text) || !/^[A-Za-z'’,.;:!?-]{1,2}$/.test(text)) continue;
           const row = rows.find((r) => r.tokens.some((t) => t.line === box.line)) || rows[0];
+          const sameWord = row.tokens.some((token) => token.text.toLowerCase() === text.toLowerCase());
+          if (sameWord) continue;
           row.tokens.push({ text, x0: box.x0, x1: box.x1, y0: box.y0, y1: box.y1, base: box.base, line: box.line });
           row.tokens.sort((a, b) => a.x0 - b.x0);
         }

@@ -61,3 +61,20 @@ First line of the photo, treble: every bar right except bar 5's hollow triangle 
 - UI must meet WCAG 2.1 AA.
 - Don't commit, push or release until Forrest says so. Release recipe and gotchas: see the `chartshift` notes he keeps.
 - Test windows (smoke, screenshots) open on his second monitor without focus; never on the primary screen.
+
+## Chord chart lyric OCR (0.10.0)
+
+0.9.0 added **Make a chord chart** (`src/lib/lyrics.js`, `makeChordChart` in `src/App.jsx`). On Forrest's photo (`Documents\ChartShift Library\IMG_4063.chartshift`) the app's chart drops or mangles words near the hand shadow's edge: "taught" missing, "grace" read as "pce", "I first" as "T fist", "lost" as "lst", "less days" missing.
+
+What was found:
+- The app's OCR (tesseract.js in the browser, `public/tesseract` wasm) reads differently from tesseract.js under Node, so `scripts/chart-debug.mjs` did NOT reproduce the problem. To reproduce for real: copy the song into `public/` (e.g. `public/zz-test-song.chartshift`, **delete it afterwards, never commit it**), start the Vite dev server (`npm run dev`, port 5183), open `http://localhost:5183/?debug`, then in the console: `await window.__openFile('IMG_4063.chartshift', new Uint8Array(await (await fetch('/zz-test-song.chartshift')).arrayBuffer()))`, then More menu → Read sheet music… → Make a chord chart, and read `__editor.getState().write.text`.
+- Reading the whole page made the OCR lose its way among the staffs and notes.
+- The cleaned image (`cleanedForReading` in `src/lib/omr.js`) looked intact around "taught" when inspected, so the remaining losses are in what the OCR returns for words crossing the shadow's edge, not (visibly) in the clean-up.
+
+Changes in 0.10.0:
+- `lyricBands(music)` in `src/lib/lyrics.js`: the band of words between each system's staffs. The app and `scripts/chart-debug.mjs` now OCR only those bands, each as one block of text (`recognise(canvas, scale, { block: true })`, page-segmentation mode 6), with word coordinates and OCR line ids offset back to the page.
+- `src/lib/ocr.js`: full-page reading now always uses mode 3 (automatic); `readWord` and `readSyllable` restore mode 3 afterwards (they used to leave the engine in mode 6, so a later page read depended on what ran before).
+- Where the cleaned lyric band differs substantially from the source photo, the app compares an enlarged OCR pass on the original photo. Confident words fill clear gaps; uncertain disagreements keep the cleaned read.
+- The close-up retry is limited to one- and two-letter words and skips a word already present in that verse. When multiple chords land before the first lyric syllable, only the last is shown there to avoid a pickup chord stacking with the following chord.
+
+Verification: `npm test` (124/124) and `npm run smoke` pass. The smoke test uses a clean engraved hymn; it does not verify the owner's photographed page. OCR output from the photographed page should still be checked by eye, particularly at the shadow edge and around pickup notes. The last in-app inspection was interrupted before this release's final OCR changes could be checked on that page.

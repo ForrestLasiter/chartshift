@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { createWorker } from 'tesseract.js';
 import { cleanedForReading, readMusic } from '../src/lib/omr.js';
 import { analyse } from '../src/lib/sheet.js';
-import { chordChart, missingSyllables } from '../src/lib/lyrics.js';
+import { chordChart, lyricBands, missingSyllables } from '../src/lib/lyrics.js';
 import { pngBytes, readPng } from '../test/helpers/png.mjs';
 
 const [file] = process.argv.slice(2);
@@ -18,16 +18,27 @@ const result = analyse(music);
 
 const worker = await createWorker('eng', 1, { langPath: path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'tesseract'), gzip: true, cachePath: (await import('node:os')).tmpdir() });
 const clean = cleanedForReading(img);
-const { data } = await worker.recognize(pngBytes(clean), {}, { blocks: true, text: false });
-// The same grouping into rows as src/lib/ocr.js.
+// As the app: only the bands of words between the staffs, each read as a block of text.
+const cut = (box) => {
+  const x0 = Math.max(0, Math.round(box.x0)), y0 = Math.max(0, Math.round(box.y0));
+  const w = Math.min(clean.width - x0, Math.round(box.x1 - box.x0)), h = Math.min(clean.height - y0, Math.round(box.y1 - box.y0));
+  const data = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) data.set(clean.data.subarray(((y0 + y) * clean.width + x0) * 4, ((y0 + y) * clean.width + x0 + w) * 4), y * w * 4);
+  return { png: pngBytes({ data, width: w, height: h }), x0, y0 };
+};
 const words = [];
-let lineNumber = 0;
-for (const block of data.blocks || []) for (const p of block.paragraphs) for (const line of p.lines) { lineNumber++; for (const w of line.words) {
-  const text = w.text.trim();
-  if (!text || w.confidence < 20) continue;
-  const base = w.baseline && w.baseline.has_baseline !== false ? (w.baseline.y0 + w.baseline.y1) / 2 : w.bbox.y1;
-  words.push({ text, x0: w.bbox.x0 / scale, y0: w.bbox.y0 / scale, x1: w.bbox.x1 / scale, y1: w.bbox.y1 / scale, base: base / scale, line: lineNumber });
-} }
+await worker.setParameters({ tessedit_pageseg_mode: '6' });
+for (const band of lyricBands(music)) {
+  const { png, x0, y0 } = cut(band);
+  const { data } = await worker.recognize(png, {}, { blocks: true, text: false });
+  let lineNumber = 1000 * (band.system + 1);
+  for (const block of data.blocks || []) for (const p of block.paragraphs) for (const line of p.lines) { lineNumber++; for (const w of line.words) {
+    const text = w.text.trim();
+    if (!text || w.confidence < 20) continue;
+    const base = (w.baseline && w.baseline.has_baseline !== false ? (w.baseline.y0 + w.baseline.y1) / 2 : w.bbox.y1) + y0;
+    words.push({ text, x0: (w.bbox.x0 + x0) / scale, y0: (w.bbox.y0 + y0) / scale, x1: (w.bbox.x1 + x0) / scale, y1: (w.bbox.y1 + y0) / scale, base: base / scale, line: lineNumber });
+  } }
+}
 const rows = [];
 for (const word of words.sort((a, b) => a.base - b.base)) {
   const height = word.y1 - word.y0, row = rows[rows.length - 1];

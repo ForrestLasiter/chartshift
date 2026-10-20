@@ -20,8 +20,11 @@ function getWorker() {
 }
 
 /** Recognises the words on a rendered page. `scale` is canvas pixels per point. */
-export async function recognise(canvas, scale) {
+export async function recognise(canvas, scale, { block = false } = {}) {
   const worker = await getWorker();
+  // A block of text only (the words cut out from under a line of music):
+  // read as one uniform block rather than finding a page's layout.
+  await worker.setParameters({ tessedit_pageseg_mode: block ? '6' : '3' });
   const { data } = await worker.recognize(canvas, {}, { blocks: true, text: false });
   const words = [];
   let lineNumber = 0;
@@ -34,7 +37,7 @@ export async function recognise(canvas, scale) {
           if (!text || word.confidence < 20) continue;
           const { x0, y0, x1, y1 } = word.bbox;
           const base = word.baseline && word.baseline.has_baseline !== false ? (word.baseline.y0 + word.baseline.y1) / 2 : y1;
-          words.push({ text, x0: x0 / scale, y0: y0 / scale, x1: x1 / scale, y1: y1 / scale, base: base / scale, line: lineNumber });
+          words.push({ text, confidence: word.confidence, x0: x0 / scale, y0: y0 / scale, x1: x1 / scale, y1: y1 / scale, base: base / scale, line: lineNumber });
         }
       }
     }
@@ -79,7 +82,7 @@ export async function readWord(canvas) {
       if (text && !readings.includes(text)) readings.push(text);
     }
   } finally {
-    await worker.setParameters({ tessedit_pageseg_mode: '6' }); // back to page reading
+    await worker.setParameters({ tessedit_pageseg_mode: '3' }); // back to page reading
   }
   return readings;
 }
@@ -92,6 +95,6 @@ export async function readSyllable(canvas) {
     const { data } = await worker.recognize(canvas);
     return { text: data.text.trim(), confidence: data.confidence };
   } finally {
-    await worker.setParameters({ tessedit_pageseg_mode: '6' }); // back to page reading
+    await worker.setParameters({ tessedit_pageseg_mode: '3' }); // back to page reading
   }
 }

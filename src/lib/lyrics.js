@@ -98,6 +98,12 @@ function syllablesOf(row) {
 export function lineWithChords(syllables, chords, space) {
   const at = new Map();
   for (const chord of chords) {
+    // A pickup can put two bar chords ahead of the first printed word.
+    if (syllables.length && chord.x <= syllables[0].x + 2 * space) {
+      if (!at.has(0)) at.set(0, []);
+      at.get(0).push(chord.name);
+      continue;
+    }
     // The syllable under the chord's note: the nearest one, starting at or
     // just before it; if the music runs on with no new syllable (a held
     // note), the next syllable after it.
@@ -114,6 +120,9 @@ export function lineWithChords(syllables, chords, space) {
     if (!at.has(best)) at.set(best, []);
     at.get(best).push(chord.name);
   }
+  // Keep the chord nearest the word when a pickup and its following bar
+  // would otherwise stack on the first syllable.
+  if (at.get(0)?.length > 1) at.set(0, [at.get(0).at(-1)]);
   // A chart names a chord where it changes, so a chord carried on from the
   // one before is not written again.
   let line = '', last = null;
@@ -123,6 +132,24 @@ export function lineWithChords(syllables, chords, space) {
     line += before + s.text + (s.joinsNext || i === syllables.length - 1 ? '' : ' ');
   });
   return line;
+}
+
+/**
+ * Where the words are: for each line of music, the band between its staffs
+ * (or under its staff when it has only one), in the music picture's pixels.
+ * Reading just these bands keeps the OCR away from the notes, which confuse it.
+ */
+export function lyricBands(music) {
+  return music.systems.map((sys, systemIndex) => {
+    const staffs = sys.staffs.map((i) => music.staffs[i]);
+    const above = staffs[0];
+    const below = staffs.length > 1 ? staffs[staffs.length - 1] : music.systems[systemIndex + 1] && music.staffs[music.systems[systemIndex + 1].staffs[0]];
+    const sp = above.space;
+    const ys = (points, fallback) => (points && points.length ? points.map((p) => p[1]) : [fallback]);
+    const top = Math.max(...ys(above.bottomAt, above.lines[4])) + 1.2 * sp;
+    const bottom = below ? Math.min(...ys(below.topAt, below.lines[0])) - 1.0 * sp : top + 12 * sp;
+    return { system: systemIndex, x0: Math.max(0, sys.x0 - 2 * sp), x1: sys.x1 + 2 * sp, y0: top, y1: bottom };
+  }).filter((band) => band.y1 - band.y0 > 1.5 * music.staffs[0].space);
 }
 
 /**
