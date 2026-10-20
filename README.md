@@ -68,6 +68,7 @@ ChartShift finds the staffs and reads the notes on them: note heads (filled, hal
 Then either:
 
 - **Add to the page**: chord names above each bar and note names under the tune, as text boxes you can move or correct. The chords are marked as chords, so transposing changes them.
+- **Make a chord chart**: reads the verses printed under the music (OCR, on a cleaned-up copy so words in a shadow read too) and starts a new typed song with each verse as its own section and the chords placed over the syllables where they change, like a chord chart from a songbook site. Short words the first reading misses are looked at again where a melody note has no syllable under it. Check the words: OCR can misread or miss a word, especially in a photo.
 - **Make a chord and tab sheet**: a new typed song with, for each line of music, the chords, the note names and the tab. The tab is kept in `{start_of_tab}` blocks and set in a fixed-width font so the strings line up. The original is not changed.
 
 What to expect: it works best with a clear, complete page where the staves and note heads are visible. Strong shadows, blur, page folds, cropped staffs, dense or unusual notation, and overlapping parts can still lead to missed or misplaced notes. Shape names do not determine pitch; the reader uses each head's position on the staff. Check the generated chords, note names and tab against the page before using them.
@@ -141,6 +142,7 @@ Saving as PDF always keeps each page's own size.
 - `src/lib/textlayer.js`, `src/lib/ocr.js` – match recognised words (PDF text or Tesseract OCR) to pieces and mark chords.
 - `src/lib/chords.js`, `src/lib/chordpro.js`, `src/lib/layout.js` – chord maths, ChordPro, fit/enlarge.
 - `src/editor/` – `store.js` (pages, selection, tools, undo), `sections.js`, `music.js`, `writing.js` (written songs: text in, pages out).
+- `src/lib/lyrics.js` (the verses under the music into a chord chart), `scripts/chart-debug.mjs` (the chart for a page picture), `scripts/import-image.mjs` (a photo opened as the app does, for testing).
 - `src/lib/omr.js` (reading printed music: staff lines found and removed, then note heads, stems, beams, clefs, key signatures, accidentals and bar lines), `src/lib/sheet.js` (bars, beats, the tune and a chord per bar), `src/lib/tab.js` (frets for the tune, and the chord-and-tab sheet), `src/editor/sheetmusic.js`, `src/SheetMusicDialog.jsx`. Tested against pages engraved by Verovio (`test/helpers/engrave.mjs`); `node scripts/omr-debug.mjs <tune.abc|piece.mjs|page.png>` draws what was found.
 - `src/lib/songtext.js` (song text: structure, syllables, transposing), `src/lib/diagrams.js` (chord shapes, each checked by a test against the notes it should sound), `src/WriteTab.jsx`.
 - `src/App.jsx` (shell: title bar, editing toolbar, welcome screen), `src/PageView.jsx` (one page), `src/Inspector.jsx` (Sections / Chords / Page tabs), `src/dialogs.jsx`, `src/ui.jsx` (shared controls), `src/icons.jsx`, `src/styles.css` (design tokens) – the UI.

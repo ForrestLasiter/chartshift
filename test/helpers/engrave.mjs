@@ -168,7 +168,10 @@ export function mei({ fifths = 0, meter = '4/4', staves, lyrics = [], barThru = 
     else if (sounding !== 'n') attrs += ` accid.ges="${sounding}"`;
     if (dur) attrs += ` dur="${dur}"${dots ? ' dots="1"' : ''}`;
     if (stem) attrs += ` stem.dir="${stem}"`;
-    const verse = words && lyrics[lyric] != null ? `<verse n="1"><syl>${lyrics[lyric++]}</syl></verse>` : '';
+    // lyrics: one verse (a list of syllables) or several (a list of lists).
+    const verses = Array.isArray(lyrics[0]) ? lyrics : [lyrics];
+    const verse = words && verses[0][lyric] != null ? verses.map((v, k) => (v[lyric] != null ? `<verse n="${k + 1}"><syl>${v[lyric]}</syl></verse>` : '')).join('') : '';
+    if (verse) lyric++;
     return verse ? `<note ${attrs}>${verse}</note>` : `<note ${attrs}/>`;
   };
   let body = '';

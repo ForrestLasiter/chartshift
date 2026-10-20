@@ -20,7 +20,7 @@ export function combineReadings(readings) {
   return { key: first?.result.key || null, beats: first?.result.beats || 0, measures, systems };
 }
 
-export function SheetMusicDialog({ readings, title, pageHasChords, onAdd, onMakeSheet, onClose }) {
+export function SheetMusicDialog({ readings, title, pageHasChords, onAdd, onMakeSheet, onMakeChart, onClose }) {
   const id = useId();
   const all = combineReadings(readings);
   const notes = all.measures.reduce((n, m) => n + m.onsets.reduce((k, o) => k + o.notes.length, 0), 0);
@@ -40,6 +40,7 @@ export function SheetMusicDialog({ readings, title, pageHasChords, onAdd, onMake
   const footer = (
     <>
       {found && <button type="button" className="btn primary" disabled={!chords && !names} onClick={() => onAdd({ chords, notes: names })}>Add to the page</button>}
+      {found && <button type="button" className="btn outline" onClick={onMakeChart}>Make a chord chart</button>}
       {found && <button type="button" className="btn outline" onClick={() => onMakeSheet(sheetText(all, { title }))}>Make a chord and tab sheet</button>}
       <button type="button" className="btn outline" onClick={onClose}>{found ? 'Cancel' : 'Close'}</button>
     </>
@@ -84,7 +85,8 @@ export function SheetMusicDialog({ readings, title, pageHasChords, onAdd, onMake
             </fieldset>
             <p className="muted">
               The chords are worked out from the notes, so treat them as a suggestion. Check the notes too: smudges, very small print and
-              unusual notation can be misread. “Make a chord and tab sheet” starts a new song with the chords, note names and tab; this chart is not changed.
+              unusual notation can be misread. “Make a chord chart” reads the verses under the music and starts a new song, verse by verse, with the chords
+              over the words. “Make a chord and tab sheet” starts a new song with the chords, note names and tab. This page is not changed either way.
             </p>
           </>
         )}

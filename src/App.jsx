@@ -282,6 +282,55 @@ export function App() {
     setDialog({ type: 'sheet', readings, pageHasChords: editor.chordList().length > 0 });
   }), [editor, run]);
 
+  // A chord chart from a hymnal page: the verses under the music are read
+  // (OCR, on a cleaned-up copy so words in a shadow read too), with a second
+  // look where a tune note has no syllable, and the chords go over the words.
+  const makeChordChart = useCallback((readings) => {
+    if (!confirmDiscard()) return;
+    setDialog(null);
+    run('Reading the words…', async (progress) => {
+      const st = editor.getState();
+      const [{ cleanedForReading }, { recognise, readSyllable }, { chordChart, missingSyllables }] = await Promise.all([
+        import('./lib/omr.js'), import('./lib/ocr.js'), import('./lib/lyrics.js'),
+      ]);
+      const pages = [];
+      for (const [n, reading] of readings.entries()) {
+        progress(`Reading the words on page ${n + 1} of ${readings.length}… (the first time takes a little longer)`);
+        const canvas = renderPageCanvas(st.pages[reading.pageIndex], editor.atlases, SHEET_DPI);
+        const ctx = canvas.getContext('2d');
+        const clean = cleanedForReading(ctx.getImageData(0, 0, canvas.width, canvas.height));
+        ctx.putImageData(new ImageData(clean.data, clean.width, clean.height), 0, 0);
+        const rows = await recognise(canvas, reading.scale);
+        const page = { ...reading, rows };
+        const boxes = missingSyllables(page);
+        for (const [k, box] of boxes.entries()) {
+          progress(`Taking a closer look at the words (${k + 1} of ${boxes.length})…`);
+          const pad = 20, sx = Math.max(0, Math.round(box.x0 * reading.scale)), sy = Math.max(0, Math.round(box.y0 * reading.scale));
+          const w = Math.max(1, Math.round((box.x1 - box.x0) * reading.scale)), h = Math.max(1, Math.round((box.y1 - box.y0) * reading.scale));
+          const piece = document.createElement('canvas');
+          piece.width = w + 2 * pad;
+          piece.height = h + 2 * pad;
+          const pctx = piece.getContext('2d');
+          pctx.fillStyle = '#ffffff';
+          pctx.fillRect(0, 0, piece.width, piece.height);
+          pctx.drawImage(canvas, sx, sy, w, h, pad, pad, w, h);
+          const { text, confidence } = await readSyllable(piece);
+          // Only clear readings of a short word: a wrong word is worse than a gap.
+          if (!text || confidence < 70 || !/[A-Za-z]/.test(text) || !/^[A-Za-z'’,.;:!?-]{1,6}$/.test(text)) continue;
+          const row = rows.find((r) => r.tokens.some((t) => t.line === box.line)) || rows[0];
+          row.tokens.push({ text, x0: box.x0, x1: box.x1, y0: box.y0, y1: box.y1, base: box.base, line: box.line });
+          row.tokens.sort((a, b) => a.x0 - b.x0);
+        }
+        pages.push(page);
+      }
+      const text = chordChart(pages, { title: st.name || '' });
+      if (!text) return editor.set({ status: 'No verses were found under the music. “Make a chord and tab sheet” works without words.' });
+      const { meta, text: body } = splitChordPro(text);
+      startWritten(newWrite(meta, body), `${st.name || 'Untitled'} (chord chart)`,
+        'Made a chord chart from the hymn, verse by verse. Check the words and chords against the page; the original was not changed.');
+    });
+  }, [editor, run, startWritten, confirmDiscard]);
+
   const makeTabSheet = useCallback((text) => {
     if (!confirmDiscard()) return;
     setDialog(null);
@@ -653,7 +702,7 @@ export function App() {
       {dialogType === 'sheet' && (
         <SheetMusicDialog readings={dialog.readings} title={state.name || ''} pageHasChords={dialog.pageHasChords} onClose={() => setDialog(null)}
           onAdd={(options) => { setDialog(null); editor.addSheetLabels(dialog.readings, options); }}
-          onMakeSheet={makeTabSheet} />
+          onMakeSheet={makeTabSheet} onMakeChart={() => makeChordChart(dialog.readings)} />
       )}
       {dialogType === 'update' && (
         <UpdateDialog unsaved={state.dirty} onClose={() => setDialog(null)} onChecked={(latest) => setNewVersion(latest.available ? latest.version : null)} />

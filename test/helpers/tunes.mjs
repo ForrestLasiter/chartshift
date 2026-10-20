@@ -45,3 +45,13 @@ export const GUITAR = {
   fifths: 0, meter: '6/4',
   staves: [{ clef: 'G2_8', voices: ['E2q A2q D3q G3q B3q E4q | C3q E3q G3q C4q E4h'] }],
 };
+
+// The same hymn with two verses under the music (William Kethe, 1561), for
+// reading the words into a chord chart.
+export const OLD_HUNDREDTH_VERSES = {
+  ...OLD_HUNDREDTH,
+  lyrics: [
+    '1. All peo- -ple that on earth do dwell, Sing to the Lord with cheer- ful voice; Him serve with'.split(' '),
+    '2. Know that the Lord is God in- deed; With- out our aid he did us make; We are his'.split(' '),
+  ],
+};

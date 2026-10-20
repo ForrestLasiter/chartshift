@@ -371,6 +371,15 @@ function runSmoke(win, { output, withPrintWindow, preload, pretendVersion }) {
       r.strings = strings.map((p) => p.text.slice(0, 2));
       r.stringsLinedUp = strings.length === 6 && strings.every((p) => Math.abs(p.x - strings[0].x) < 0.01 && /Courier/.test(p.font) && p.w === strings[0].w);
       r.sheetChords = pieces.filter((p) => p.chord).length;
+      // The chord chart: the verse under the music, read, with chords over the words.
+      await window.__openFile('Old Hundredth.png', Uint8Array.from(atob(png), (c) => c.charCodeAt(0)));
+      await idle();
+      await menu('Read sheet music…');
+      press('Make a chord chart', dialog());
+      await idle();
+      r.chartName = S().name;
+      r.chart = (S().write && S().write.text) || '';
+      r.chartStatus = document.querySelector('[role=status]').textContent;
       return r;
     } catch (error) { return { pageError: String(error && error.stack || error) }; } })()`);
     if (report.sheet.pageError) throw new Error('sheet music checks failed: ' + report.sheet.pageError);
@@ -573,6 +582,16 @@ const SCENES = [
     [...document.querySelectorAll('[role=menuitem]')].find((x) => x.textContent.includes('Read sheet music')).click();
     await __h.idle();
     await __h.press('Make a chord and tab sheet', document.querySelector('dialog[open]'));
+    await __h.idle();
+    await __h.press('Fit');`],
+  ['21-chord-chart', `
+    await window.__openFile('Old Hundredth.png', Uint8Array.from(atob(window.__sheetPng), (c) => c.charCodeAt(0)));
+    await __h.idle();
+    await __h.press('More file actions');
+    [...document.querySelectorAll('[role=menuitem]')].find((x) => x.textContent.includes('Read sheet music')).click();
+    await __h.idle();
+    await __h.press('Make a chord chart', document.querySelector('dialog[open]'));
+    for (let i = 0; i < 600 && document.querySelector('.busy'); i++) await __h.sleep(100);
     await __h.idle();
     await __h.press('Fit');`],
 ];

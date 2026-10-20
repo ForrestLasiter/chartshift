@@ -58,6 +58,10 @@ export function bestChord(notes, { key, bass = null, previous = null, melodyOnly
         else if (melodyOnly) {
           if (!chromatic.some((pc) => tones.has(pc))) continue;
           score -= 0.1 * total;
+        } else if ([...tones].some((pc) => !scale.has(pc)) && ![...tones].some((pc) => !scale.has(pc) && weight[pc] > 0)) {
+          // A chord with notes from outside the key is only named when the
+          // music has one of those notes (an accidental, as in E7 in G).
+          continue;
         }
       }
       if (previous && previous.root === root && previous.quality === shape.quality) score += 0.06 * total;

@@ -142,6 +142,13 @@ const checks = {
     assert.equal(s.stringsLinedUp, true, 'six strings in a fixed-width font, one under another');
     assert.ok(s.sheetChords >= 6);
   },
+  'a chord chart is made from the verse under the music': () => {
+    const s = report.sheet;
+    assert.equal(s.chartName, 'Old Hundredth (chord chart)', s.chartStatus);
+    assert.match(s.chart, /^Verse 1\n\[G\]/, s.chart);
+    assert.match(s.chart, /that on earth do dwell/);
+    assert.match(s.chartStatus, /^Made a chord chart/);
+  },
   'the camera and the microphone are refused': () => {
     // Refused by the app, or (on a PC without one) not there at all; never granted.
     for (const device of ['camera', 'microphone']) assert.ok(['NotAllowedError', 'NotFoundError', 'NotReadableError'].includes(report.devices[device]), `${device}: ${report.devices[device]}`);

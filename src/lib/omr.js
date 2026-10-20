@@ -424,6 +424,28 @@ function integral(img, W, H) {
 }
 
 /**
+ * The page in black and white, ink judged against the paper around it, so
+ * that words in a shadow read as clearly as the rest (for OCR). Pages that
+ * are evenly lit come back unchanged.
+ */
+export function cleanedForReading(img) {
+  const { width: W, height: H } = img;
+  const grey = greyOf(img);
+  const first = lineMetrics(inkOf(grey), W, H);
+  const reach = Math.round(first.period >= 8 && first.period <= 80 ? 0.75 * first.period + 2 : W / 200);
+  const paper = paperOf(grey, W, H, reach);
+  let uneven = 0, counted = 0;
+  for (let i = 0; i < paper.length; i += 97) { counted++; if (paper[i] < 200) uneven++; }
+  if (uneven <= 0.03 * counted) return img;
+  const darkest = sweep(sweep(paper, W, H, 5, true, false), W, H, 5, false, false);
+  for (let i = 0; i < paper.length; i++) if (paper[i] - darkest[i] > 30) paper[i] = darkest[i];
+  const ink = inkAgainst(grey, paper);
+  const data = new Uint8ClampedArray(W * H * 4);
+  for (let i = 0; i < ink.length; i++) { const v = ink[i] ? 0 : 255; data[i * 4] = data[i * 4 + 1] = data[i * 4 + 2] = v; data[i * 4 + 3] = 255; }
+  return { data, width: W, height: H };
+}
+
+/**
  * Reads the music on one page.
  * @param {{data: Uint8ClampedArray, width: number, height: number}} img  RGBA pixels
  * @returns {{ staffs: object[], systems: object[], notes: object[], slope: number }}
@@ -446,7 +468,7 @@ export function readMusic(img, { debug = false } = {}) {
   // side (the darkest paper within a couple of pixels).
   const photo = uneven > 0.03 * counted;
   if (photo) {
-    const darkest = sweep(sweep(paper, W, H, 2, true, false), W, H, 2, false, false);
+    const darkest = sweep(sweep(paper, W, H, 5, true, false), W, H, 5, false, false);
     for (let i = 0; i < paper.length; i++) if (paper[i] - darkest[i] > 30) paper[i] = darkest[i];
     raw = inkAgainst(grey, paper);
   }
@@ -833,8 +855,9 @@ export function readMusic(img, { debug = false } = {}) {
     let inside = 0;
     for (let y = my - r; y <= my + r; y++) for (let x = mx - r; x <= mx + r; x++) if (blobLabels[y * W + x] === b.id) inside++;
     const hollow = inside / ((2 * r + 1) * (2 * r + 1)) < 0.35;
-    // A whole note has no stem: it must be an outline, and wide.
-    if (!stem && !(hollow && w >= 1.25 * sp)) continue;
+    // A whole note has no stem: it must be an outline, and wide, and on or
+    // near the staff (an "o" in the words below is not one).
+    if (!stem && !(hollow && w >= 1.25 * sp && cy > s.lines[0] - 2.5 * sp && cy < s.lines[4] + 2 * sp)) continue;
     // Letters of the words touch their neighbours; a head has paper beside it
     // (on the side away from its stem).
     // (Specks along a shadow's edge do not count: a letter fills a good part
@@ -897,9 +920,20 @@ export function readMusic(img, { debug = false } = {}) {
       if (last && x - last.x1 <= 1) last.x1 = x; else bars.push({ x0: x, x1: x });
     }
     // A bar line stands alone; a stem whose head was missed is joined to it.
+    // On a photo a bar line can also touch a speck or a beam's end; it still
+    // counts if no head sits beside it and nothing spreads from it inside the staff.
     const alone = (b) => {
-      const l = labelAt(Math.round((b.x0 + b.x1) / 2), Math.round((top + bottom) / 2));
-      return !l || comps[l - 1].w <= b.x1 - b.x0 + 1 + 0.5 * s.space;
+      const x = Math.round((b.x0 + b.x1) / 2), bw = b.x1 - b.x0 + 1;
+      const l = labelAt(x, Math.round((top + bottom) / 2));
+      if (!l || comps[l - 1].w <= bw + 0.5 * s.space) return true;
+      const c = comps[l - 1];
+      if (c.h > bottom - top + 2.5 * s.space) return false;
+      if (heads.some((h) => h.staff === s && h.cy > top - 3 * s.space && h.cy < bottom + 3 * s.space && (Math.abs(h.x0 - b.x1) < 0.2 * s.space || Math.abs(b.x0 - h.x1) < 0.2 * s.space))) return false;
+      for (let k = 1; k <= 7; k++) {
+        const run = hRun(sym, W, x, Math.round(top + (k * (bottom - top)) / 8));
+        if (run && run[1] - run[0] + 1 > bw + 0.5 * s.space) return false;
+      }
+      return true;
     };
     s.bars = bars.filter((b) => b.x1 - b.x0 + 1 <= 0.8 * s.space && alone(b)).map((b) => (b.x0 + b.x1) / 2);
   }
@@ -1106,6 +1140,9 @@ export function readMusic(img, { debug = false } = {}) {
     if (head.cx <= s.headerEnd) continue;
     const sp = s.space;
     const step = Math.round(stepAt(s, head.cx, head.cy));
+    // More than three ledger lines out is the words or the next staff, not a
+    // note (guitar music, in its own clef, goes lower: the open low E).
+    if (step < (s.clef === 'treble8' ? -9 : -6) || step > 14) continue;
     const number = BOTTOM_LINE[s.clef] + step;
     const letter = ((number % 7) + 7) % 7;
     const octave = Math.floor(number / 7);
@@ -1159,8 +1196,16 @@ export function readMusic(img, { debug = false } = {}) {
 
   // Back to the page's own (tilted, bent) coordinates.
   for (const n of unique) n.y = toPage(n.x, n.y);
+  // Where the top and bottom lines run across the page (they can curve on a
+  // photo), as [x, y] points every couple of spaces.
+  const traced = (s, y) => {
+    const points = [];
+    for (let x = s.x0; x < s.x1 + 2 * s.space; x += 2 * s.space) points.push([Math.min(x, s.x1), toPage(Math.min(x, s.x1), y)]);
+    return points;
+  };
   const out = staffs.map((s) => ({
     index: s.index, lines: s.lines.map((y) => toPage((s.x0 + s.x1) / 2, y)), space: s.space, x0: s.x0, x1: s.x1,
+    topAt: traced(s, s.lines[0]), bottomAt: traced(s, s.lines[4]),
     clef: s.clef, fifths: s.fifths, bars: s.bars, headerEnd: s.headerEnd,
   }));
   return {

@@ -8,7 +8,8 @@ import { fretNotes, sheetText, tabRows } from '../src/lib/tab.js';
 import { parseChordPro } from '../src/lib/chordpro.js';
 import { parseStructure, splitChordPro, transposeText } from '../src/lib/songtext.js';
 import { engrave, mei } from './helpers/engrave.mjs';
-import { GUITAR, OLD_HUNDREDTH, OLD_HUNDREDTH_CHORDS, TERRA_BEATA, WALTZ_ABC } from './helpers/tunes.mjs';
+import { GUITAR, OLD_HUNDREDTH, OLD_HUNDREDTH_CHORDS, OLD_HUNDREDTH_VERSES, TERRA_BEATA, WALTZ_ABC } from './helpers/tunes.mjs';
+import { pngBytes } from './helpers/png.mjs';
 
 const SCANNED = { scale: 26, rotate: 0.5, blur: 1, noise: 0.6 };
 
@@ -176,4 +177,35 @@ test('shape notes (seven-shape heads) are read by where they sit, whatever their
     const s = score(result, truth);
     assert.ok(s.recall >= need && s.precision >= 0.95, JSON.stringify(s));
   }
+});
+
+test('a chord chart is made from the verses under the music, chords over the words', { timeout: 120000 }, async () => {
+  const { createWorker } = await import('tesseract.js');
+  const { chordChart } = await import('../src/lib/lyrics.js');
+  const { img } = await engrave(mei(OLD_HUNDREDTH_VERSES));
+  const music = readMusic(img);
+  const result = analyse(music);
+  // Real OCR, as the app does it, on the engraved page.
+  const scale = 1; // the picture's pixels stand in for page points here
+  const worker = await createWorker('eng', 1, { langPath: new URL('../public/tesseract', import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1'), gzip: true, cachePath: (await import('node:os')).tmpdir() });
+  const { data } = await worker.recognize(Buffer.from(pngBytes(img)), {}, { blocks: true, text: false });
+  await worker.terminate();
+  let lineNumber = 0;
+  const words = [];
+  for (const block of data.blocks || []) for (const p of block.paragraphs) for (const line of p.lines) {
+    lineNumber++;
+    for (const w of line.words) if (w.text.trim() && w.confidence >= 20) words.push({ text: w.text.trim(), x0: w.bbox.x0, x1: w.bbox.x1, y0: w.bbox.y0, y1: w.bbox.y1, base: w.bbox.y1, line: lineNumber });
+  }
+  const text = chordChart([{ music, result, rows: [{ base: 0, tokens: words }], scale }], { title: 'Old Hundredth' });
+  assert.match(text, /^\{title: Old Hundredth\}\n\{key: G\}\n\{time: 4\/4\}\n/);
+  const verse1 = text.split('Verse 1\n')[1].split('\n')[0];
+  const verse2 = text.split('Verse 2\n')[1].split('\n')[0];
+  // (OCR can misread a word or two; the rest of each line must be there, in order.)
+  assert.match(verse1, /^\[G\]\S*.*that on earth do dwell.*cheerful.*voice/, verse1);
+  assert.match(verse2, /^\[G\]Know that the .*is God in-?deed.*make/, verse2);
+  assert.ok(!/\[[^\]]*[a-z][^\]]*\]/.test(text.replace(/\[[A-G][^\]]*\]/g, '')), 'no stray brackets in the words');
+  // Chords sit at the same places in both verses (the same music).
+  const where = (line) => [...line.matchAll(/\[([^\]]+)\]/g)].map((m) => m[1]);
+  assert.deepEqual(where(verse1), where(verse2));
+  assert.ok(!/\[([^\]]+)\]\[\1\]/.test(text), 'a chord is not written twice running');
 });

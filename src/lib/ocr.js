@@ -24,15 +24,17 @@ export async function recognise(canvas, scale) {
   const worker = await getWorker();
   const { data } = await worker.recognize(canvas, {}, { blocks: true, text: false });
   const words = [];
+  let lineNumber = 0;
   for (const block of data.blocks || []) {
     for (const paragraph of block.paragraphs) {
       for (const line of paragraph.lines) {
+        lineNumber++;
         for (const word of line.words) {
           const text = word.text.trim();
           if (!text || word.confidence < 20) continue;
           const { x0, y0, x1, y1 } = word.bbox;
           const base = word.baseline && word.baseline.has_baseline !== false ? (word.baseline.y0 + word.baseline.y1) / 2 : y1;
-          words.push({ text, x0: x0 / scale, y0: y0 / scale, x1: x1 / scale, y1: y1 / scale, base: base / scale });
+          words.push({ text, x0: x0 / scale, y0: y0 / scale, x1: x1 / scale, y1: y1 / scale, base: base / scale, line: lineNumber });
         }
       }
     }
@@ -80,4 +82,16 @@ export async function readWord(canvas) {
     await worker.setParameters({ tessedit_pageseg_mode: '6' }); // back to page reading
   }
   return readings;
+}
+
+/** Reads one short word (a syllable of a hymn verse) from a small picture: { text, confidence }. */
+export async function readSyllable(canvas) {
+  const worker = await getWorker();
+  try {
+    await worker.setParameters({ tessedit_pageseg_mode: '8' }); // a single word
+    const { data } = await worker.recognize(canvas);
+    return { text: data.text.trim(), confidence: data.confidence };
+  } finally {
+    await worker.setParameters({ tessedit_pageseg_mode: '6' }); // back to page reading
+  }
 }
