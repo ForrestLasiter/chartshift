@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('chartshift', {
     exportAll: call('library:export'),
     importAll: call('library:import'),
     setFolder: call('library:setFolder'),
+    readHymnals: call('library:readHymnals'),
+    saveHymnals: call('library:saveHymnals'),
   },
   settings: {
     get: call('settings:get'),

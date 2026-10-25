@@ -86,3 +86,36 @@ Forrest asked for a proven approach after the chord chart still failed at church
 - **Notes (OMR):** homr 0.7.0 (camera-photo OMR, AGPL-3.0, Python) scored 95.9% on the engraved set against ChartShift's own reader's 98.0% (ours is tuned to that set). On his shape-note photo, every disputed bar checked against the photo was right in ours and wrong in homr (its errors were on diamonds and triangles). Decision: keep our reader for notes. homr's AGPL licence would also be a problem to bundle.
 - **Words (OCR):** Tesseract was the real failure. PaddleOCR's PP-OCRv6 small models (Apache 2.0, ONNX, from RapidOCR) read his shadowed photo almost perfectly. Ported: `src/lib/paddleocr.js` (text finding with slant-following crops, CTC decoding with per-letter positions), `src/lib/wordReader.js` (onnxruntime-web/wasm in the app, models in `public/paddleocr`, wasm copied to `public/ort` by `npm run assets`). `makeChordChart` now uses it on the raw word bands; Tesseract is still used for chord charts' "Read text from scan".
 - Remaining small misses on his photo: "I" at the start of "I once was lost", a stray "s" in "That s saved", "first" in the last line.
+
+That work was released as 0.11.0.
+
+## 2026-10-25: free hymn library and hymnal numbers (uncommitted)
+
+After 0.11.0, the I'll Fly Away photo (Brumley, 1932, four systems, page curled and shot at an angle) still read badly. Forrest then changed direction: instead of reading sheet music, look songs up in a free library, by title or by the number in the church's own hymnal, and let ChartShift transpose them. He pointed at OpenHymnal, then at WorshipCommons, and suggested loading the hymnal's index so numbers are matched automatically. Built:
+
+- **The library** (`public/hymnal/hymns.json`, 563 songs, built by `scripts/build-hymnal.mjs`):
+  - WorshipCommons (github.com/ChurchApps/WorshipCommonsContent `catalog.json`): English songs that are PD or CC-BY/CC-BY-SA only. WC-License and writer-permission songs grant worship use, not redistribution in an app, so they are left out.
+  - WC's first verse and chorus are hand-written and good; its later verses are machine-flowed and often garbled (run-together lines, chorus pasted in, typos). Where WC has the score (`tune.abc`, really the Open Hymnal files; about 315 songs), every verse comes from the score and WC's verse-1/chorus chords and line breaks are moved onto the tune by time (`src/lib/chartGuide.js` `chordsFromChart`). 308 fit; 7 fall back to chords worked out from the four parts (`hymnChords`).
+  - Without a score: WC's chart, later verses re-lined like verse 1 (`tidyChart`).
+  - Plus 17 Open Hymnal hymns WC lacks.
+  - Rebuild with:
+    `node scripts/build-hymnal.mjs --wc catalog.json --cache <dir> --openhymnal <checkout>`
+    The cache folder holds the downloaded scores.
+- **ABC reader** `src/lib/abc.js` and chart maker `src/lib/hymn.js`. Lyric rule learnt: in abcm2ps, tied notes take a syllable slot too (`*`).
+- **Hymnal numbers** `src/lib/hymnIndex.js`: parses index text ("Title .... 209", "209 Title", two columns per line) and matches titles to the library, allowing for OCR slips and shortened titles.
+  - `src/lib/indexReader.js` reads index photos with the PaddleOCR word reader, grouping words into rows by height (dot leaders split a title from its number). PDFs use their own text, or OCR for scans.
+  - Saved per library in `Hymnal numbers.json` (IPC `library:readHymnals` / `library:saveHymnals`, validated by `parseHymnals` in safety.cjs), so it syncs with the library folder.
+  - The numbers travel with library export/import zips and with moving the library folder. Merging never overwrites: a different hymnal of the same name is added as "(imported)" (`songStore.mergeHymnalsInto`, tested).
+- **UI** `src/HymnDialog.jsx`: Find a hymn (toolbar, welcome screen, Ctrl+H) and Add a hymnal. Index entries not in the library are kept, so a number still names the song and says why it is missing.
+- Tests: `test/hymnal.test.mjs`; smoke checks for finding, opening, adding a hymnal and finding by number.
+- Verified in the dev preview:
+  - a picture of a two-column index: 14 of 14 entries read and matched;
+  - a text PDF index read correctly.
+- **Not tried yet:** Forrest's real hymnal index.
+- **Photo reader work in progress:** the I'll Fly Away fixes are kept outside the repo in `F:\DEV\Claude\chartshift-wip\omr-wip-ill-fly-away.js`. They are not applied because one test fails. What they do:
+  - a five-line comb filter per strip and per-staff slope in `bendOf`;
+  - a slope-aware outlier filter;
+  - row-merged, locally judged `findLines` with dash gaps;
+  - clef curl pieces joined;
+  - a flat split from its stem.
+  With them, all 8 staffs and the Bb key are found on that photo.

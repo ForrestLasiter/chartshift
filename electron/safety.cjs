@@ -77,6 +77,9 @@ const LIMITS = {
   zipTotalBytes: 2048 * MB,   // everything in it, unpacked
   printPages: 500,
   printImageBytes: 80 * MB,
+  hymnalBytes: 4 * MB,         // the hymnal numbers file
+  hymnalBooks: 20,
+  hymnalEntries: 5000,
   exportBytes: 1024 * MB,     // a PDF or ChordPro file being saved
 };
 
@@ -95,6 +98,25 @@ function parseSetlist(text) {
   if (!data || !Array.isArray(data.songs)) throw new Error('The setlist file is damaged.');
   if (data.songs.length > LIMITS.setlistSongs) throw new Error('The setlist has too many songs.');
   return { songs: data.songs.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.slice(0, 120)) };
+}
+
+// The church's hymnals, by their index: { books: [{ name, entries: [{ number,
+// title, hymn }] }], current }. Anything else in the file is dropped.
+function parseHymnals(text) {
+  if (text.length > LIMITS.hymnalBytes) throw new Error('The hymnal numbers file is too large.');
+  let data;
+  try { data = JSON.parse(text); } catch { throw new Error('The hymnal numbers file is damaged.'); }
+  const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+  const books = (Array.isArray(data?.books) ? data.books : []).slice(0, LIMITS.hymnalBooks)
+    .filter((b) => b && typeof b.name === 'string' && b.name.trim())
+    .map((b) => ({
+      name: str(b.name, 120).trim(),
+      entries: (Array.isArray(b.entries) ? b.entries : []).slice(0, LIMITS.hymnalEntries)
+        .filter((e) => e && typeof e.number === 'string' && e.number.trim())
+        .map((e) => ({ number: str(e.number, 12).trim(), title: str(e.title, 200), hymn: typeof e.hymn === 'string' ? e.hymn.slice(0, 200) : null })),
+    }));
+  const current = books.some((b) => b.name === data?.current) ? data.current : books[0]?.name || null;
+  return { books, current };
 }
 
 /**
@@ -207,6 +229,6 @@ ${css}
 module.exports = {
   APP_ORIGIN, DEV_ORIGIN, CONTENT_SECURITY_POLICY, LIMITS, SONG_EXT, SETLIST_EXT,
   isTrustedUrl, isInside, resolveAppPath, createSerialQueue,
-  safeName, parseSetlist, planZipImport, decideWrite, copyName,
+  safeName, parseSetlist, parseHymnals, planZipImport, decideWrite, copyName,
   checkPrintPages, buildPrintHtml,
 };

@@ -181,3 +181,50 @@ export async function importImage(data, ids, atlases, onProgress) {
   notes.scans = 1;
   return { pages: [pageFromCanvas(canvas, w, h, ids, atlases, true, notes)], notes };
 }
+
+/**
+ * The pages of a PDF one at a time, for reading rather than editing: each
+ * page's own text as lines (empty for a scan) and, when it has no text, a
+ * picture of it at `dpi`. Yields { number, count, text: string[], canvas }.
+ */
+export async function* pdfPages(data, dpi = 200) {
+  let pdf;
+  try {
+    pdf = await openPdf(data);
+  } catch (error) {
+    throw new Error(error?.name === 'PasswordException' ? 'This PDF is password-protected. Remove the password and try again.' : 'This PDF could not be read. It may be damaged.');
+  }
+  try {
+    const count = Math.min(pdf.numPages, LIMITS.pdfPages);
+    for (let n = 1; n <= count; n++) {
+      await nextFrame();
+      const page = await pdf.getPage(n);
+      // Text items on the same height make a line, left to right.
+      const rows = [];
+      for (const item of (await page.getTextContent()).items) {
+        if (!item.str || !item.str.trim()) continue;
+        const [x, y] = [item.transform[4], item.transform[5]];
+        let row = rows.find((r) => Math.abs(r.y - y) < 3);
+        if (!row) { row = { y, items: [] }; rows.push(row); }
+        row.items.push({ x, str: item.str });
+      }
+      const text = rows.sort((a, b) => b.y - a.y).map((r) => r.items.sort((a, b) => a.x - b.x).map((i) => i.str).join(' ').replace(/\s+/g, ' ').trim());
+      let canvas = null;
+      if (text.length < 5) {
+        const base = page.getViewport({ scale: 1 });
+        const viewport = page.getViewport({ scale: Math.min(dpi / 72, MAX_SIDE / Math.max(base.width, base.height)) });
+        canvas = document.createElement('canvas');
+        canvas.width = Math.round(viewport.width);
+        canvas.height = Math.round(viewport.height);
+        const canvasContext = canvas.getContext('2d', { willReadFrequently: true });
+        canvasContext.fillStyle = '#ffffff';
+        canvasContext.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvas, canvasContext, viewport, intent: 'print' }).promise;
+      }
+      page.cleanup();
+      yield { number: n, count, text, canvas };
+    }
+  } finally {
+    await pdf.loadingTask.destroy();
+  }
+}

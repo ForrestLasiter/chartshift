@@ -15,7 +15,7 @@ const fsp = require('fs/promises');
 const { constants } = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { SONG_EXT, SETLIST_EXT, LIMITS, safeName, decideWrite, copyName } = require('./safety.cjs');
+const { SONG_EXT, SETLIST_EXT, LIMITS, safeName, decideWrite, copyName, parseHymnals } = require('./safety.cjs');
 
 // A file's version is a hash of its bytes: unlike a timestamp it cannot be
 // fooled by a sync app touching the file, and it matches across PCs.
@@ -244,7 +244,38 @@ async function recoverOrphans(dir, { now = () => new Date(), minAgeMs = 120000 }
   return recovered;
 }
 
+// The church's hymnals and their song numbers, kept beside the songs.
+const HYMNALS = 'Hymnal numbers.json';
+
+async function readHymnalsIn(dir) {
+  try { return parseHymnals(await fsp.readFile(path.join(dir, HYMNALS), 'utf8')); } catch (e) {
+    if (e.code === 'ENOENT') return { books: [], current: null };
+    throw e;
+  }
+}
+
+// Adds hymnals (from an import, or a library being moved) to a folder's own.
+// As with songs, nothing is overwritten: a different hymnal of the same name
+// is added as "(imported)". Returns how many were added.
+async function mergeHymnalsInto(dir, incoming) {
+  const have = await readHymnalsIn(dir);
+  let added = 0;
+  for (const book of incoming.books) {
+    const same = have.books.find((b) => b.name === book.name);
+    if (same && JSON.stringify(same.entries) === JSON.stringify(book.entries)) continue;
+    let name = book.name;
+    for (let n = 1; have.books.some((b) => b.name === name); n++) name = `${book.name} (imported${n > 1 ? ' ' + n : ''})`;
+    have.books.push({ ...book, name });
+    added++;
+  }
+  if (!added) return 0;
+  const clean = parseHymnals(JSON.stringify({ books: have.books, current: have.current || incoming.current }));
+  await writeAtomic(path.join(dir, HYMNALS), Buffer.from(JSON.stringify(clean, null, 1)));
+  return added;
+}
+
 module.exports = {
+  HYMNALS, readHymnalsIn, mergeHymnalsInto,
   versionOf, isLibraryFile, readIfExists, placeExclusive, writeNew, writeAtomic, placeUnique, renameExclusive,
   writeSong, mergeInto, migrateLibrary, recoverOrphans,
 };

@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs/promises');
 const { existsSync, mkdirSync, readFileSync, writeFileSync } = require('fs');
 const JSZip = require('jszip');
-const { LIMITS, SONG_EXT: SONG, SETLIST_EXT: SETLIST, safeName, parseSetlist, planZipImport, createSerialQueue } = require('./safety.cjs');
+const { LIMITS, SONG_EXT: SONG, SETLIST_EXT: SETLIST, safeName, parseSetlist, parseHymnals, planZipImport, createSerialQueue } = require('./safety.cjs');
 const store = require('./songStore.cjs');
 
 const { versionOf, writeAtomic, isLibraryFile } = store;
@@ -34,6 +34,10 @@ function libraryDir() {
 
 const songPath = (name) => path.join(libraryDir(), safeName(name) + SONG);
 const setlistPath = (name) => path.join(libraryDir(), safeName(name) + SETLIST);
+// The church's hymnal numbers live with the songs, so a synced library
+// shares them between PCs.
+const { HYMNALS, readHymnalsIn, mergeHymnalsInto } = store;
+const hymnalsPath = () => path.join(libraryDir(), HYMNALS);
 
 async function readSong(name) {
   const file = songPath(name);
@@ -146,6 +150,12 @@ function register(getWindow, handle) {
   });
   handle('library:removeSetlist', (_e, name) => shell.trashItem(setlistPath(name)));
   handle('library:reveal', () => shell.openPath(libraryDir()));
+  handle('library:readHymnals', () => readHymnalsIn(libraryDir()));
+  handle('library:saveHymnals', async (_e, data) => {
+    const clean = parseHymnals(JSON.stringify(data ?? {}));
+    await writeAtomic(hymnalsPath(), Buffer.from(JSON.stringify(clean, null, 1)));
+    return clean;
+  });
 
   handle('library:export', async () => {
     const dir = libraryDir();
@@ -163,6 +173,7 @@ function register(getWindow, handle) {
       zip.file(file, await fs.readFile(path.join(dir, file)), { compression: 'STORE' });
       count++;
     }
+    if (existsSync(path.join(dir, HYMNALS))) zip.file(HYMNALS, await fs.readFile(path.join(dir, HYMNALS)), { compression: 'STORE' });
     await writeAtomic(result.filePath, await zip.generateAsync({ type: 'nodebuffer' }));
     return { path: result.filePath, count };
   });
@@ -197,7 +208,15 @@ function register(getWindow, handle) {
     // Same rule as moving folders: nothing here is overwritten, and a different
     // song of the same name is added beside it as an "imported copy".
     const merged = await store.mergeInto(libraryDir(), files, 'imported copy');
-    return { ...merged, rejected: rejected.slice(0, 20), rejectedCount: rejected.length };
+    const numbers = entries.find((e) => !e.dir && String(e.name).split(/[/\\]/).pop() === HYMNALS);
+    let hymnals = 0;
+    if (numbers) {
+      try {
+        if (numbers.size > LIMITS.hymnalBytes) throw new Error('too large');
+        hymnals = await mergeHymnalsInto(libraryDir(), parseHymnals(await numbers.entry.async('string')));
+      } catch { rejected.push({ name: HYMNALS, reason: 'it is damaged' }); }
+    }
+    return { ...merged, hymnals, rejected: rejected.slice(0, 20), rejectedCount: rejected.length };
   });
 
   // Moves the library to another folder: one picked in a dialog, or the
@@ -224,6 +243,7 @@ function register(getWindow, handle) {
     // file with different contents is never skipped or overwritten: both are
     // kept (see songStore.mergeInto). The previous folder is left untouched.
     const merged = await store.migrateLibrary(previous, target);
+    try { await mergeHymnalsInto(target, await readHymnalsIn(previous)); } catch { /* a damaged numbers file stays behind */ }
     writeSettings({ libraryDir: target });
     return { ...info(), ...merged, previous };
   });

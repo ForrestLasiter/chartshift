@@ -7,6 +7,7 @@ import { UpdateDialog } from './UpdateDialog.jsx';
 import { Icon, Logo } from './icons.jsx';
 import { IconButton, Menu, Segmented } from './ui.jsx';
 import { ChordReviewDialog, ConflictDialog, LibraryDialog, NameDialog, NewSongDialog, PrintPreviewDialog } from './dialogs.jsx';
+import { HymnDialog } from './HymnDialog.jsx';
 import { importPdf, importImage } from './lib/importer.js';
 import { loadProject, saveProject } from './lib/project.js';
 import { exportPdf, exportSetlistPdf, printImages } from './lib/exporter.js';
@@ -244,6 +245,17 @@ export function App() {
     const saved = await platform.saveFile({ kind: 'cho', suggestedName: `${st.name || 'Untitled'}.cho`, data: new TextEncoder().encode(text) });
     if (saved) editor.set({ status: `Exported ChordPro file ${saved.name}.` });
   }, [editor]);
+
+  // A song from the free hymn library, opened as a written song (so it can
+  // be put in another key, given a capo, and so on).
+  const openHymn = useCallback(({ hymn, number, book }) => {
+    if (!confirmDiscard()) return;
+    setDialog(null);
+    const { meta, text } = splitChordPro(hymn.chart);
+    const credit = [hymn.writer, hymn.credit].filter(Boolean).join(' · ');
+    startWritten(newWrite({ ...meta, artist: meta.artist || credit }, text), hymn.title,
+      `Opened “${hymn.title}”${number ? ` (No. ${number} in ${book})` : ''} from the free hymn library (${hymn.source}, ${hymn.credit.toLowerCase() === 'public domain' ? 'public domain' : hymn.credit}). Change its key on the Write tab.`);
+  }, [startWritten, confirmDiscard]);
 
   const newSong = useCallback((meta) => {
     setDialog(null);
@@ -510,6 +522,7 @@ export function App() {
       const done = () => e.preventDefault();
       if (mod && key === 'o') { done(); open(); return; }
       if (mod && key === 'n') { done(); if (confirmDiscard()) setDialog('newSong'); return; }
+      if (mod && key === 'h') { done(); setDialog('hymns'); return; }
       if (mod && key === 'l') { done(); setDialog('library'); return; }
       if (!st.pages) return;
       if (mod) {
@@ -578,6 +591,7 @@ export function App() {
           <button type="button" className="btn" onClick={() => { if (confirmDiscard()) setDialog('newSong'); }} title="Write a new song from a blank page (Ctrl+N)"><Icon name="plus" />New</button>
           <button type="button" className="btn" onClick={open} title="Open a PDF, image, ChordPro file or song (Ctrl+O)"><Icon name="folder" />Open</button>
           <button type="button" className="btn" onClick={() => setDialog('library')} title="Saved songs and setlists (Ctrl+L)"><Icon name="library" />Library</button>
+          <button type="button" className="btn" onClick={() => setDialog('hymns')} title="Find a hymn by title or by its number in your hymnal (Ctrl+H)" aria-label="Find a hymn"><Icon name="search" /><span className="optional">Hymns</span></button>
           <button type="button" className="btn primary" onClick={() => saveSong(false)} disabled={!hasDoc} title="Save to the library (Ctrl+S)"><Icon name="save" />Save</button>
           <button type="button" className="btn" onClick={savePdf} disabled={!hasDoc} title="Save as a PDF (Ctrl+E)" aria-label="Save as PDF"><Icon name="pdf" /><span className="optional">PDF</span></button>
           <button type="button" className="btn" onClick={print} disabled={!hasDoc} title="Print preview and print (Ctrl+P)" aria-label="Print"><Icon name="print" /><span className="optional">Print</span></button>
@@ -658,6 +672,7 @@ export function App() {
                 <button type="button" className="btn primary large" onClick={open}><Icon name="folder" />Open a PDF or image…</button>
                 <button type="button" className="btn outline large" onClick={() => setDialog('newSong')}><Icon name="edit" />Write a new song</button>
                 <button type="button" className="btn outline large" onClick={() => setDialog('library')}><Icon name="library" />Song library</button>
+                <button type="button" className="btn outline large" onClick={() => setDialog('hymns')}><Icon name="search" />Find a hymn</button>
               </div>
               <h2>Recent songs</h2>
               {recent.length ? (
@@ -704,6 +719,7 @@ export function App() {
         <UpdateDialog unsaved={state.dirty} onClose={() => setDialog(null)} onChecked={(latest) => setNewVersion(latest.available ? latest.version : null)} />
       )}
       {dialogType === 'newSong' && <NewSongDialog onCreate={newSong} onClose={() => setDialog(null)} />}
+      {dialogType === 'hymns' && <HymnDialog onOpen={openHymn} onClose={() => setDialog(null)} />}
       {dialogType === 'review' && <ChordReviewDialog editor={editor} onClose={() => setDialog(null)} />}
       {dialogType === 'saveName' && (
         <NameDialog title="Save song" label="Song name" initial={state.name || 'Untitled'} action="Save to library"

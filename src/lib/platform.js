@@ -69,6 +69,7 @@ function memoryLibrary() {
   const songs = new Map();
   const setlists = new Map();
   let counter = 0;
+  let hymnals = { books: [], current: null };
   const put = (name, data) => { const version = `v${++counter}`; songs.set(name, { data, modified: Date.now(), version }); return version; };
   return {
     info: async () => ({ dir: '(browser preview: songs are kept in memory only)', clouds: [] }),
@@ -103,6 +104,8 @@ function memoryLibrary() {
     exportAll: async () => null,
     importAll: async () => null,
     setFolder: async () => null,
+    readHymnals: async () => hymnals,
+    saveHymnals: async (data) => { hymnals = { books: data.books || [], current: data.current || null }; return hymnals; },
   };
 }
 

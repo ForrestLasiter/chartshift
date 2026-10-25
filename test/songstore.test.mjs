@@ -230,3 +230,20 @@ test('moving the same library twice adds nothing new the second time', async () 
   assert.equal(to.get(first.conflicts[0].savedAs + SONG), 'a', 'the earlier copy is not overwritten');
   assert.equal(to.get(third.conflicts[0].savedAs + SONG), 'a newer edit');
 });
+
+test('hymnal numbers merge into a library without overwriting', async () => {
+  const f = folder();
+  const ours = { books: [{ name: 'Church Hymnal', entries: [{ number: '209', title: 'Amazing Grace', hymn: 'wc:a' }] }], current: 'Church Hymnal' };
+  assert.equal(await store.mergeHymnalsInto(f.dir, ours), 1, 'into an empty library');
+  assert.deepEqual(await store.readHymnalsIn(f.dir), ours);
+  assert.equal(await store.mergeHymnalsInto(f.dir, ours), 0, 'the same hymnal again changes nothing');
+  const theirs = { books: [{ name: 'Church Hymnal', entries: [{ number: '12', title: 'Abide with Me', hymn: null }] }, { name: 'Gospel Book', entries: [] }], current: 'Gospel Book' };
+  assert.equal(await store.mergeHymnalsInto(f.dir, theirs), 2);
+  const after = await store.readHymnalsIn(f.dir);
+  assert.deepEqual(after.books.map((b) => b.name), ['Church Hymnal', 'Church Hymnal (imported)', 'Gospel Book']);
+  assert.equal(after.books[0].entries[0].number, '209', 'ours is untouched');
+  assert.equal(after.current, 'Church Hymnal', 'the chosen hymnal stays chosen');
+  // A damaged file is reported, not replaced.
+  f.put(store.HYMNALS, '{ not json');
+  await assert.rejects(store.readHymnalsIn(f.dir), /damaged/);
+});

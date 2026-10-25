@@ -384,6 +384,43 @@ function runSmoke(win, { output, withPrintWindow, preload, pretendVersion }) {
     } catch (error) { return { pageError: String(error && error.stack || error) }; } })()`);
     if (report.sheet.pageError) throw new Error('sheet music checks failed: ' + report.sheet.pageError);
 
+    // The free hymn library: find a hymn by title, open it, add a hymnal
+    // from its index, and find a song by its number.
+    report.hymns = await page(`(async () => { try {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const dialog = () => document.querySelector('dialog[open]');
+      const press = (name, scope = document) => { const el = [...scope.querySelectorAll('button')].find((x) => (x.getAttribute('aria-label') || x.textContent.trim()) === name); if (!el) throw new Error('no control named ' + name); el.click(); };
+      const type = (el, value) => { Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value').set.call(el, value); el.dispatchEvent(new Event('input', { bubbles: true })); };
+      const named = (el) => (el.getAttribute('aria-label') || el.textContent || '').trim().length > 0;
+      const labelled = (el) => !!(el.getAttribute('aria-label') || el.closest('label') || (el.id && document.querySelector('label[for="' + el.id + '"]')));
+      window.confirm = () => true;
+      const r = {};
+      press('Find a hymn'); await sleep(1500);
+      r.count = dialog().querySelector('[role=status]').textContent;
+      r.focus = document.activeElement.type;
+      type(dialog().querySelector('input[type=search]'), 'amazing grace'); await sleep(300);
+      r.found = [...dialog().querySelectorAll('.hymn-results .name')].map((el) => el.firstChild.textContent);
+      r.unnamed = [...dialog().querySelectorAll('button')].filter((el) => !named(el)).length + [...dialog().querySelectorAll('input, select, textarea')].filter((el) => !labelled(el)).length;
+      dialog().querySelector('.hymn-results button').click(); await sleep(800);
+      r.name = __editor.getState().name;
+      r.chart = (__editor.getState().write && __editor.getState().write.text) || '';
+      press('Find a hymn'); await sleep(800);
+      press('Add a hymnal…', dialog()); await sleep(300);
+      type(dialog().querySelector('input[type=text]'), 'Church Hymnal');
+      type(dialog().querySelector('textarea'), 'Amazing Grace ...... 209' + String.fromCharCode(10) + "I'll Fly Away 46");
+      await sleep(100);
+      press('Read the index', dialog()); await sleep(500);
+      r.read = dialog().querySelector('[role=status]').textContent;
+      r.addUnnamed = [...dialog().querySelectorAll('button')].filter((el) => !named(el)).length + [...dialog().querySelectorAll('input, select, textarea')].filter((el) => !labelled(el)).length;
+      press('Save hymnal', dialog()); await sleep(600);
+      type(dialog().querySelector('input[type=search]'), '209'); await sleep(300);
+      r.byNumber = [...dialog().querySelectorAll('.hymn-results li')].map((li) => li.textContent);
+      r.saved = await window.chartshift.library.readHymnals();
+      press('Close Find a hymn', dialog()); await sleep(300);
+      return r;
+    } catch (error) { return { pageError: String(error && error.stack || error) }; } })()`);
+    if (report.hymns.pageError) throw new Error('hymn library checks failed: ' + report.hymns.pageError);
+
     // Navigation away from the app is refused.
     await page(`location.href = 'https://example.com/'; 0`).catch(() => {});
     await sleep(400);

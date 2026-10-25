@@ -149,6 +149,24 @@ const checks = {
     assert.match(s.chart, /that on earth do dwell/);
     assert.match(s.chartStatus, /^Made a chord chart/);
   },
+  'a hymn is found by title and opens as a chord chart': () => {
+    const h = report.hymns;
+    assert.match(h.count, /^\d{3} free songs/, h.count);
+    assert.equal(h.focus, 'search', 'the search box has the focus');
+    assert.equal(h.found[0], 'Amazing Grace', h.found.join(', '));
+    assert.equal(h.unnamed, 0);
+    assert.equal(h.name, 'Amazing Grace');
+    assert.match(h.chart, /^Verse 1\n\[G\]Amazing grace/, h.chart);
+    assert.match(h.chart, /Verse 2\n.*\[[A-G]/, 'later verses have chords');
+  },
+  'a hymnal is added from its index and songs are found by number': () => {
+    const h = report.hymns;
+    assert.match(h.read, /^1 of 2 songs found in the free library/, h.read);
+    assert.equal(h.addUnnamed, 0);
+    assert.match(h.byNumber[0], /^No\. 209\s*Amazing Grace/, h.byNumber.join(' | '));
+    assert.equal(h.saved.current, 'Church Hymnal');
+    assert.deepEqual(h.saved.books[0].entries.map((e) => [e.number, !!e.hymn]), [['209', true], ['46', false]]);
+  },
   'the camera and the microphone are refused': () => {
     // Refused by the app, or (on a PC without one) not there at all; never granted.
     for (const device of ['camera', 'microphone']) assert.ok(['NotAllowedError', 'NotFoundError', 'NotReadableError'].includes(report.devices[device]), `${device}: ${report.devices[device]}`);

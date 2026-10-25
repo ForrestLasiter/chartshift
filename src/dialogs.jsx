@@ -215,7 +215,8 @@ export function LibraryDialog({ onClose, onOpenSong, onRenamed, onSetlistPdf, on
     const refused = result.rejectedCount
       ? ` ${result.rejectedCount} could not be imported: ${result.rejected.map((r) => `${r.name} (${r.reason})`).join('; ')}${result.rejectedCount > result.rejected.length ? '; …' : ''}.`
       : '';
-    say(`Import finished: ${describeMerge(result, 'added')}${refused}`);
+    const hymnals = result.hymnals ? ` ${plural(result.hymnals, 'hymnal')} with song numbers added.` : '';
+    say(`Import finished: ${describeMerge(result, 'added')}${hymnals}${refused}`);
   });
   const setFolder = guard(async (cloudPath) => {
     const result = await library.setFolder(cloudPath);
