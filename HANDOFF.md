@@ -78,3 +78,11 @@ Changes in 0.10.0:
 - The close-up retry is limited to one- and two-letter words and skips a word already present in that verse. When multiple chords land before the first lyric syllable, only the last is shown there to avoid a pickup chord stacking with the following chord.
 
 Verification: `npm test` (124/124) and `npm run smoke` pass. The smoke test uses a clean engraved hymn; it does not verify the owner's photographed page. OCR output from the photographed page should still be checked by eye, particularly at the shadow edge and around pickup notes. The last in-app inspection was interrupted before this release's final OCR changes could be checked on that page.
+
+## 2026-10-24: proven tools tested; words now read with PaddleOCR (uncommitted)
+
+Forrest asked for a proven approach after the chord chart still failed at church. Tested on the engraved pages (`node scripts/omr-bench.mjs <folder> --homr <path>`, scores bar by bar against the truth) and on his real photos:
+
+- **Notes (OMR):** homr 0.7.0 (camera-photo OMR, AGPL-3.0, Python) scored 95.9% on the engraved set against ChartShift's own reader's 98.0% (ours is tuned to that set). On his shape-note photo, every disputed bar checked against the photo was right in ours and wrong in homr (its errors were on diamonds and triangles). Decision: keep our reader for notes. homr's AGPL licence would also be a problem to bundle.
+- **Words (OCR):** Tesseract was the real failure. PaddleOCR's PP-OCRv6 small models (Apache 2.0, ONNX, from RapidOCR) read his shadowed photo almost perfectly. Ported: `src/lib/paddleocr.js` (text finding with slant-following crops, CTC decoding with per-letter positions), `src/lib/wordReader.js` (onnxruntime-web/wasm in the app, models in `public/paddleocr`, wasm copied to `public/ort` by `npm run assets`). `makeChordChart` now uses it on the raw word bands; Tesseract is still used for chord charts' "Read text from scan".
+- Remaining small misses on his photo: "I" at the start of "I once was lost", a stray "s" in "That s saved", "first" in the last line.

@@ -1,6 +1,7 @@
 // Reading printed sheet music: engraved test pieces (clean, and made to look
 // scanned) must come back with the right notes, keys, chords and tab.
 import { test } from 'node:test';
+import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import { readMusic } from '../src/lib/omr.js';
 import { analyse, bestChord } from '../src/lib/sheet.js';
@@ -180,21 +181,22 @@ test('shape notes (seven-shape heads) are read by where they sit, whatever their
 });
 
 test('a chord chart is made from the verses under the music, chords over the words', { timeout: 120000 }, async () => {
-  const { createWorker } = await import('tesseract.js');
-  const { chordChart } = await import('../src/lib/lyrics.js');
+  const ort = await import('onnxruntime-web');
+  const { createPaddleOcr } = await import('../src/lib/paddleocr.js');
+  const { chordChart, lyricBands } = await import('../src/lib/lyrics.js');
   const { img } = await engrave(mei(OLD_HUNDREDTH_VERSES));
   const music = readMusic(img);
   const result = analyse(music);
-  // Real OCR, as the app does it, on the engraved page.
+  // The app's word reader (PaddleOCR), on the bands of words between the staffs.
+  const model = (name) => fs.readFileSync(new URL(`../public/paddleocr/${name}`, import.meta.url));
+  const reader = await createPaddleOcr({ ort, det: model('PP-OCRv6_det_small.onnx'), rec: model('PP-OCRv6_rec_small.onnx'), keys: model('rec_keys.txt').toString('utf8') });
   const scale = 1; // the picture's pixels stand in for page points here
-  const worker = await createWorker('eng', 1, { langPath: new URL('../public/tesseract', import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1'), gzip: true, cachePath: (await import('node:os')).tmpdir() });
-  const { data } = await worker.recognize(Buffer.from(pngBytes(img)), {}, { blocks: true, text: false });
-  await worker.terminate();
-  let lineNumber = 0;
   const words = [];
-  for (const block of data.blocks || []) for (const p of block.paragraphs) for (const line of p.lines) {
-    lineNumber++;
-    for (const w of line.words) if (w.text.trim() && w.confidence >= 20) words.push({ text: w.text.trim(), x0: w.bbox.x0, x1: w.bbox.x1, y0: w.bbox.y0, y1: w.bbox.y1, base: w.bbox.y1, line: lineNumber });
+  for (const band of lyricBands(music)) {
+    const x = Math.round(band.x0), y = Math.round(band.y0), w = Math.min(img.width - x, Math.round(band.x1 - band.x0)), h = Math.round(band.y1 - band.y0);
+    const data = new Uint8ClampedArray(w * h * 4);
+    for (let r = 0; r < h; r++) data.set(img.data.subarray(((y + r) * img.width + x) * 4, ((y + r) * img.width + x + w) * 4), r * w * 4);
+    for (const word of await reader.readWords({ data, width: w, height: h })) words.push({ text: word.text, x0: word.x0 + x, x1: word.x1 + x, y0: word.y0 + y, y1: word.y1 + y, base: (word.y0 + word.y1) / 2 + y, line: word.line });
   }
   const text = chordChart([{ music, result, rows: [{ base: 0, tokens: words }], scale }], { title: 'Old Hundredth' });
   assert.match(text, /^\{title: Old Hundredth\}\n\{key: G\}\n\{time: 4\/4\}\n/);
@@ -208,4 +210,14 @@ test('a chord chart is made from the verses under the music, chords over the wor
   const where = (line) => [...line.matchAll(/\[([^\]]+)\]/g)].map((m) => m[1]);
   assert.deepEqual(where(verse1), where(verse2));
   assert.ok(!/\[([^\]]+)\]\[\1\]/.test(text), 'a chord is not written twice running');
+});
+
+test('a chord over the second word stays there instead of being treated as a pickup', async () => {
+  const { lineWithChords } = await import('../src/lib/lyrics.js');
+  const line = lineWithChords(
+    [{ text: 'first', x: 10 }, { text: 'second', x: 30 }],
+    [{ name: 'Ab', x: 10 }, { name: 'Cm', x: 29 }],
+    10,
+  );
+  assert.equal(line, '[Ab]first [Cm]second');
 });

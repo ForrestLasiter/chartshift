@@ -3,6 +3,8 @@ dist/
 release/
 public/pdfjs/
 public/tesseract/
+public/ort/
+public/zz-*
 *.log
 smoke.png
 screenshots/

@@ -82,6 +82,8 @@ function syllablesOf(row) {
       if (m) { number = /\d/.test(m[1]) ? Number(m[1]) : 1; text = m[2] || ''; if (!text) return; }
     }
     if (/^[-–]+$/.test(text)) { if (out.length) out[out.length - 1].joinsNext = true; return; }
+    // A lone "1" or "l" among the words is the word "I" misread.
+    if (/^[1l]$/.test(text)) text = 'I';
     const lead = /^[-–]/.test(text), trail = /[-–]$/.test(text);
     text = text.replace(/^[-–]+|[-–]+$/g, '');
     if (!text) return;
@@ -98,8 +100,8 @@ function syllablesOf(row) {
 export function lineWithChords(syllables, chords, space) {
   const at = new Map();
   for (const chord of chords) {
-    // A pickup can put two bar chords ahead of the first printed word.
-    if (syllables.length && chord.x <= syllables[0].x + 2 * space) {
+    // A pickup can put a chord before the first printed word.
+    if (syllables.length && chord.x < syllables[0].x - 0.5 * space) {
       if (!at.has(0)) at.set(0, []);
       at.get(0).push(chord.name);
       continue;

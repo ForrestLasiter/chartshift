@@ -22,4 +22,10 @@ for (const file of readdirSync(join(modules, 'tesseract.js-core'))) {
 }
 cpSync(join(modules, '@tesseract.js-data', 'eng', '4.0.0', 'eng.traineddata.gz'), join(ocr, 'eng.traineddata.gz'));
 
+// ONNX Runtime (WebAssembly) for the PaddleOCR word reader; its models are
+// kept in the repository, in public/paddleocr.
+const ort = join(root, 'public', 'ort');
+mkdirSync(ort, { recursive: true });
+for (const file of ['ort-wasm-simd-threaded.wasm', 'ort-wasm-simd-threaded.mjs']) cpSync(join(modules, 'onnxruntime-web', 'dist', file), join(ort, file));
+
 console.log('pdf.js and OCR assets copied to public/');

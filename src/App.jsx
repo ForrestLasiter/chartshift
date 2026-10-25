@@ -285,88 +285,39 @@ export function App() {
   // A chord chart from a hymnal page: the verses under the music are read
   // (OCR, on a cleaned-up copy so words in a shadow read too), with a second
   // look where a tune note has no syllable, and the chords go over the words.
+  // A chord chart from a hymnal page: the verses under the music are read
+  // with the PaddleOCR word reader (far better than Tesseract on photos),
+  // one band of words between the staffs at a time, and the chords go over
+  // the words.
   const makeChordChart = useCallback((readings) => {
     if (!confirmDiscard()) return;
     setDialog(null);
     run('Reading the words…', async (progress) => {
       const st = editor.getState();
-      const [{ cleanedForReading }, { recognise, readSyllable }, { chordChart, lyricBands, missingSyllables }] = await Promise.all([
-        import('./lib/omr.js'), import('./lib/ocr.js'), import('./lib/lyrics.js'),
-      ]);
+      const [{ wordReader }, { chordChart, lyricBands }] = await Promise.all([import('./lib/wordReader.js'), import('./lib/lyrics.js')]);
+      progress('Getting the word reader ready…');
+      const reader = await wordReader();
       const pages = [];
       for (const [n, reading] of readings.entries()) {
-        progress(`Reading the words on page ${n + 1} of ${readings.length}… (the first time takes a little longer)`);
         const canvas = renderPageCanvas(st.pages[reading.pageIndex], editor.atlases, SHEET_DPI);
-        const ctx = canvas.getContext('2d');
-        const original = document.createElement('canvas');
-        original.width = canvas.width;
-        original.height = canvas.height;
-        original.getContext('2d').drawImage(canvas, 0, 0);
-        const photoPixels = original.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
-        const clean = cleanedForReading(ctx.getImageData(0, 0, canvas.width, canvas.height));
-        ctx.putImageData(new ImageData(clean.data, clean.width, clean.height), 0, 0);
-        // Only the bands of words between the staffs are read: notes confuse the OCR.
-        const rows = [];
-        for (const band of lyricBands(reading.music)) {
-          const x = Math.round(band.x0), y = Math.round(band.y0);
-          const w = Math.round(band.x1 - band.x0), h = Math.round(band.y1 - band.y0);
-          const readBand = async (source, enlargement = 1) => {
-            const piece = document.createElement('canvas');
-            piece.width = w * enlargement;
-            piece.height = h * enlargement;
-            piece.getContext('2d').drawImage(source, x, y, w, h, 0, 0, piece.width, piece.height);
-            return recognise(piece, reading.scale * enlargement, { block: true });
-          };
-          // The photo can retain letters softened by cleanup; enlargement helps tiny print.
-          const baseRows = await readBand(canvas);
-          let changed = 0, samples = 0;
-          for (let py = y; py < y + h; py += 4) for (let px = x; px < x + w; px += 4) {
-            const at = (py * canvas.width + px) * 4;
-            if (Math.abs(photoPixels[at] - clean.data[at]) > 35 || Math.abs(photoPixels[at + 1] - clean.data[at + 1]) > 35 || Math.abs(photoPixels[at + 2] - clean.data[at + 2]) > 35) changed++;
-            samples++;
-          }
-          const otherRows = changed / samples > 0.15 ? await readBand(original, 2) : [];
-          const dx = Math.round(band.x0) / reading.scale, dy = Math.round(band.y0) / reading.scale;
-          const chosen = baseRows.flatMap((row) => row.tokens.map((word) => ({ ...word })));
-          const staffSpace = reading.music.staffs[reading.music.systems[band.system].staffs[0]].space / reading.scale;
-          for (const word of otherRows.flatMap((row) => row.tokens)) {
-            const centre = (word.x0 + word.x1) / 2;
-            const match = chosen.find((other) => Math.abs((other.x0 + other.x1) / 2 - centre) < Math.max(0.65 * staffSpace, 0.4 * (other.x1 - other.x0)));
-            if (match) {
-              if ((match.confidence ?? 100) < 45 && (word.confidence ?? 0) >= (match.confidence ?? 0) + 20) Object.assign(match, word);
-            } else if ((word.confidence ?? 0) >= 50 && !chosen.some((other) => Math.abs((other.x0 + other.x1) / 2 - centre) < 1.2 * staffSpace)) {
-              chosen.push({ ...word });
-            }
-          }
-          const merged = await import('./lib/ocr.js').then(({ rowsByBaseline }) => rowsByBaseline(chosen));
-          for (const row of merged) {
-            for (const t of row.tokens) { t.x0 += dx; t.x1 += dx; t.y0 += dy; t.y1 += dy; t.base += dy; t.line += 1000 * (band.system + 1); }
-            rows.push({ ...row, base: row.base + dy });
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const tokens = [];
+        const bands = lyricBands(reading.music);
+        for (const [k, band] of bands.entries()) {
+          progress(`Reading the words on page ${n + 1} of ${readings.length} (line ${k + 1} of ${bands.length})…`);
+          const x = Math.max(0, Math.round(band.x0)), y = Math.max(0, Math.round(band.y0));
+          const w = Math.min(canvas.width - x, Math.round(band.x1 - band.x0)), h = Math.min(canvas.height - y, Math.round(band.y1 - band.y0));
+          if (w < 10 || h < 10) continue;
+          const pixels = ctx.getImageData(x, y, w, h);
+          for (const word of await reader.readWords({ data: pixels.data, width: w, height: h })) {
+            const s = reading.scale;
+            tokens.push({
+              text: word.text, x0: (word.x0 + x) / s, x1: (word.x1 + x) / s, y0: (word.y0 + y) / s, y1: (word.y1 + y) / s,
+              base: ((word.y0 + word.y1) / 2 + y) / s, line: 1000 * (band.system + 1) + word.line,
+            });
           }
         }
-        const page = { ...reading, rows };
-        const boxes = missingSyllables(page);
-        for (const [k, box] of boxes.entries()) {
-          progress(`Taking a closer look at the words (${k + 1} of ${boxes.length})…`);
-          const pad = 20, sx = Math.max(0, Math.round(box.x0 * reading.scale)), sy = Math.max(0, Math.round(box.y0 * reading.scale));
-          const w = Math.max(1, Math.round((box.x1 - box.x0) * reading.scale)), h = Math.max(1, Math.round((box.y1 - box.y0) * reading.scale));
-          const piece = document.createElement('canvas');
-          piece.width = w + 2 * pad;
-          piece.height = h + 2 * pad;
-          const pctx = piece.getContext('2d');
-          pctx.fillStyle = '#ffffff';
-          pctx.fillRect(0, 0, piece.width, piece.height);
-          pctx.drawImage(canvas, sx, sy, w, h, pad, pad, w, h);
-          const { text, confidence } = await readSyllable(piece);
-          // Only clear readings of a short word: a wrong word is worse than a gap.
-          if (!text || confidence < 70 || !/[A-Za-z]/.test(text) || !/^[A-Za-z'’,.;:!?-]{1,2}$/.test(text)) continue;
-          const row = rows.find((r) => r.tokens.some((t) => t.line === box.line)) || rows[0];
-          const sameWord = row.tokens.some((token) => token.text.toLowerCase() === text.toLowerCase());
-          if (sameWord) continue;
-          row.tokens.push({ text, x0: box.x0, x1: box.x1, y0: box.y0, y1: box.y1, base: box.base, line: box.line });
-          row.tokens.sort((a, b) => a.x0 - b.x0);
-        }
-        pages.push(page);
+        pages.push({ ...reading, rows: [{ base: 0, tokens }] });
       }
       const text = chordChart(pages, { title: st.name || '' });
       if (!text) return editor.set({ status: 'No verses were found under the music. “Make a chord and tab sheet” works without words.' });
